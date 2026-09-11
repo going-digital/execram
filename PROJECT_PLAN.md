@@ -172,7 +172,15 @@ PROJECT_PLAN.md                 this file
   `@embedFile`; proven end to end with a placeholder stub
   (`stubs/example/hello.s`) and a unit test asserting the exact bytes
 - Container/stub format v0 documented in `docs/format-spec.md`
-- FS-UAE test harness bootstrapped with a "hello world" hunk exe
+- ~~FS-UAE test harness bootstrapped~~ ✅ done — `tests/uae/run_boot_test.sh`
+  assembles a bare-metal boot block (`tests/uae/boot/sentinel.s`, no
+  filesystem/Exec/DOS dependency), packs it into a bootable ADF, boots it
+  under FS-UAE against a real Kickstart ROM, and checks a sentinel string
+  on the emulated serial port — passing end to end against Kickstart 1.3.
+  Local/dev-only by necessity: Kickstart ROMs are copyrighted and can't be
+  committed or fetched in public CI (see `docs/LICENSES.md` §7 and
+  `tests/uae/README.md`). Later milestones point this same mechanism at
+  actual execram-packed executables instead of the sentinel.
 
 **M1 — Hunk engine + store backend** (~2–3 weeks)
 - `hunk.zig`: parse HUNK_HEADER/CODE/DATA/BSS/RELOC32(+16/8 variants)/

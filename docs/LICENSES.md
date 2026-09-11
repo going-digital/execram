@@ -175,7 +175,17 @@ reuse. That assumption was wrong:
 `PROJECT_PLAN.md` §3 and §7 (M4) should be updated to reflect this — see
 the accompanying edit.
 
-## 7. Summary table
+## 7. Kickstart ROMs (test dependency, not a project dependency)
+
+The FS-UAE boot tests under `tests/uae/` need a real Kickstart ROM to run
+against. Kickstart ROMs are copyrighted (originally Commodore-Amiga, now
+Cloanto). **They must never be committed to this repo, fetched by CI, or
+otherwise redistributed by this project.** Anyone running the boot tests
+supplies their own legally-obtained ROM via the `EXECRAM_KICKSTART`
+environment variable (see `tests/uae/README.md`); this is why those tests
+are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
+
+## 8. Summary table
 
 | Component | License | Vendor/adapt OK? | Obligations |
 |---|---|---|---|
