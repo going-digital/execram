@@ -164,8 +164,13 @@ PROJECT_PLAN.md                 this file
 
 **M0 — Foundations** (~1–2 weeks)
 - ~~License audit~~ ✅ done — see [`docs/LICENSES.md`](docs/LICENSES.md)
-- Repo scaffold (`build.zig`, CI skeleton)
-- vasm wired into the Zig build as a build step producing raw stub binaries
+- ~~Repo scaffold~~ ✅ done — Zig 0.16 project (`build.zig`/`build.zig.zon`),
+  GitHub Actions CI (`ubuntu-latest` + `macos-latest`, builds vasm from
+  source since it isn't vendored — see licensing note)
+- ~~vasm wired into the Zig build~~ ✅ done — `build.zig` assembles each
+  `stubs/<name>/*.s` with vasm into a raw binary and embeds it via
+  `@embedFile`; proven end to end with a placeholder stub
+  (`stubs/example/hello.s`) and a unit test asserting the exact bytes
 - Container/stub format v0 documented in `docs/format-spec.md`
 - FS-UAE test harness bootstrapped with a "hello world" hunk exe
 

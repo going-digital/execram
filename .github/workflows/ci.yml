@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+
+      # vasm has no official package on either runner image, and per its
+      # license (docs/LICENSES.md) we don't vendor it in this repo - so
+      # build it fresh from upstream source every run. It's a ~700KB, few-
+      # second build.
+      - name: Build vasm (m68k/mot)
+        run: |
+          curl -sL -o /tmp/vasm.tar.gz http://sun.hasenbraten.de/vasm/release/vasm.tar.gz
+          tar xzf /tmp/vasm.tar.gz -C /tmp
+          make -C /tmp/vasm CPU=m68k SYNTAX=mot
+          echo "/tmp/vasm" >> "$GITHUB_PATH"
+
+      - name: zig build test
+        run: zig build test --summary all
+
+      - name: zig build
+        run: zig build --summary all
