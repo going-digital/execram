@@ -1,0 +1,255 @@
+# execram — Project Plan
+
+**execram** is an executable compressor/cruncher for Amiga programs, in the
+spirit of [Shrinkler](https://github.com/askeksa/Shrinkler): it takes an
+AmigaDOS hunk executable, compresses it, and glues on a tiny 68000
+decompressor stub so the result is a self-extracting executable that
+decompresses itself in memory and jumps to the original entry point.
+
+Unlike Shrinkler (which hardcodes one LZMA-like algorithm), execram is built
+around a **pluggable backend** design from day one, so multiple compression
+algorithms can target the same container/stub-loading mechanism:
+
+- **Inflate** (DEFLATE) — depacker reference: Keir Fraser's
+  [inflate.S](https://github.com/keirf/Amiga-Stuff/blob/master/inflate/inflate.S)
+- **ZX0** (Einar Saukas) — host compressor:
+  [ZX0](https://github.com/einar-saukas/ZX0), depacker reference:
+  [unzx0_68000](https://github.com/emmanuel-marty/unzx0_68000)
+- **Shrinkler-class** — an original LZMA-like optimal-parse + range-coder
+  backend, matching Shrinkler's ratio class without reusing its (GPL) code
+
+Decisions locked in for this plan:
+
+- **Host tool language:** Zig 0.16
+- **Backend build order:** Inflate → ZX0 → Shrinkler-class
+
+---
+
+## 1. Goals
+
+- Compress AmigaDOS hunk executables and produce a smaller self-extracting
+  executable that runs correctly on real 68000 Amigas (and emulators).
+- Support several interchangeable compression backends behind one CLI and
+  one container/stub-loading convention, selectable per-run or via
+  `--backend=auto` (try all, keep the smallest working result).
+- Match or approach Shrinkler-class ratios eventually, without depending on
+  or redistributing Shrinkler's own (GPL) code.
+- Keep the runtime decompressor stubs hand-tuned for size and speed, since
+  they run on real 68000s in chip RAM before the program's own code exists.
+
+## 2. Non-goals (v1)
+
+- Overlay-hunk executables (`HUNK_OVERLAY`) — detect and reject with a clear
+  error rather than silently mishandling them.
+- Resident-library / multi-segment loader tricks beyond a single merged
+  load segment (Shrinkler itself has the same restriction).
+- GUI — CLI only.
+- AmigaOS-native build of the host tool — it runs on the developer's
+  machine (macOS/Linux/Windows), cross-targeting the Amiga executable it
+  produces. An AmigaOS-native port is future work, not v1.
+
+## 3. Prior art & licensing — must be resolved before any code is vendored
+
+This is the highest-leverage early task, because it determines *how* each
+backend gets built (adapt existing source vs. clean-room reimplementation
+from a written algorithm description):
+
+**Audited 2026-09-11 — see [`docs/LICENSES.md`](docs/LICENSES.md) for exact
+license text and commit hashes.** Headline result, which corrects the
+assumption this plan started with: **Shrinkler is not GPL.** Its depacker
+(`ShrinklerDecompress.S`) is public-domain-equivalent, and the rest of the
+codebase is a permissive attribution-only license (no copyleft). No
+component here requires clean-room reimplementation on legal grounds.
+
+| Component | Role | License (verified) | Vendor/adapt OK? |
+|---|---|---|---|
+| Shrinkler — general codebase | design/engineering reference | Custom permissive (own text) | Yes — include `LICENSE.txt` in source dist, don't misattribute in binary dist |
+| Shrinkler — `ShrinklerDecompress.S` | depacker reference for M4 | Public-domain-equivalent | Yes — no obligations |
+| ZX0 (einar-saukas/ZX0) | host compressor + 68k depacker reference | BSD-3-Clause (compressor) / zlib (depacker) | Yes — retain notices |
+| unzx0_68000 (emmanuel-marty) | 68k depacker reference | zlib | Yes — retain notice, don't misrepresent origin |
+| Keir Fraser's Amiga-Stuff `inflate.S` | 68k depacker reference | Unlicense (public domain) | Yes — no obligations |
+| vasm | build-time assembler dependency | Custom (free for M68k/AmigaOS commercial use — our exact case) | Use as an external tool only; don't vendor the tool itself |
+
+Practical upshot for the milestones below: each backend may adapt or port
+existing source directly (keeping the relevant notice in
+`docs/algorithm-notes/` and in the stub source itself) rather than requiring
+a from-scratch reimplementation. Clean-room design is now an engineering
+choice, not a legal requirement — see the M4 update below.
+
+## 4. Architecture
+
+```
+                     ┌───────────────────────────┐
+ input.exe  ───────► │ execram (Zig host tool)   │
+ (AmigaDOS hunks)     │                           │
+                     │  1. hunk.zig  (parse)     │
+                     │  2. flatten.zig           │
+                     │     merge hunks + build   │
+                     │     flat reloc stream     │
+                     │  3. backend (pick one):   │
+                     │     store / inflate / zx0 │
+                     │     / shrinkler-class     │
+                     │  4. stub.zig              │
+                     │     patch + embed the     │
+                     │     matching 68k depacker │
+                     └──────────────┬────────────┘
+                                    ▼
+                     output.exe (self-extracting):
+                     [ HUNK_CODE: depacker stub ]
+                     [ HUNK_DATA: compressed blob ]
+                     [ HUNK_BSS:  decompress buffer ]
+```
+
+- **Backend interface** (`backend.zig`): `compress(flat_image) -> bytes` on
+  the host side, paired with a fixed stub id so `stub.zig` knows which
+  pre-assembled 68k binary to embed and how to patch its parameter table
+  (original size, packed size, entry offset, memory requirements).
+- **68k stubs are hand-written assembly**, assembled at build time by
+  **vasm** (invoked as a Zig build step), and embedded into the host
+  binary via `@embedFile` on the assembled raw binary — not generated by
+  Zig's own codegen (Zig has no mature AmigaOS/m68k target).
+- **Container format**: our own small header (magic, backend id, original
+  size, packed size, load-address flags CHIP/FAST, safety margin) —
+  documented in `docs/format-spec.md`, versioned from the start so old
+  execram-packed executables stay decodable by future stub revisions.
+- **In-place decompression safety margin**: like Shrinkler, decompression
+  writes backward/overlapping into the same buffer the compressed data
+  occupies; each backend must publish a worst-case expansion-per-byte
+  figure so the host tool can size the safety margin correctly. Until a
+  backend's margin math is verified, decompress into a separate buffer.
+
+## 5. Proposed repo layout
+
+```
+/build.zig, /build.zig.zon      Zig 0.16 project
+/src/
+  main.zig                      CLI entry (pack / info)
+  hunk.zig                      AmigaDOS hunk parser/writer
+  flatten.zig                   hunk merge + reloc flattening
+  backend.zig                   backend trait/interface + registry
+  backends/
+    store.zig                   no-op backend (M1 baseline)
+    inflate.zig                 DEFLATE encoder (M2)
+    zx0.zig                     ZX0 optimal-parse compressor (M3)
+    shrinkler.zig                original LZMA-like backend (M4)
+  stub.zig                      embeds + patches the matching 68k stub
+/stubs/                         68k assembly, built with vasm
+  common/                       shared macros (exec calls, cache flush, etc.)
+  inflate/depack.s
+  zx0/depack.s
+  shrinkler/depack.s
+/tests/
+  corpus/                       sample hunk executables (rights-cleared)
+  roundtrip/                    host-side pack+verify tests
+  uae/                          FS-UAE headless boot-test scripts
+/docs/
+  LICENSES.md
+  format-spec.md
+  hunk-format-notes.md
+  algorithm-notes/              one file per backend
+PROJECT_PLAN.md                 this file
+```
+
+## 6. Toolchain
+
+- Zig 0.16 (host tool + build system)
+- vasm (Motorola syntax, m68k-amiga target) for all 68k stub assembly,
+  invoked from `build.zig`
+- FS-UAE (or WinUAE) + a legally-sourced Kickstart ROM, for integration
+  testing — headless where possible, driven by scripts under `/tests/uae`
+- GitHub Actions CI: `zig build`, `zig build test`, plus a UAE smoke-test
+  job once M1 lands
+
+## 7. Milestones
+
+**M0 — Foundations** (~1–2 weeks)
+- ~~License audit~~ ✅ done — see [`docs/LICENSES.md`](docs/LICENSES.md)
+- Repo scaffold (`build.zig`, CI skeleton)
+- vasm wired into the Zig build as a build step producing raw stub binaries
+- Container/stub format v0 documented in `docs/format-spec.md`
+- FS-UAE test harness bootstrapped with a "hello world" hunk exe
+
+**M1 — Hunk engine + store backend** (~2–3 weeks)
+- `hunk.zig`: parse HUNK_HEADER/CODE/DATA/BSS/RELOC32(+16/8 variants)/
+  SYMBOL/DEBUG/END; detect and reject HUNK_OVERLAY
+- `flatten.zig`: merge hunks into one image, rewrite relocations into a
+  flat, compressible stream
+- `store` backend (no compression) proves the full pipeline end-to-end
+- **Deliverable:** `execram pack --backend=store in.exe out.exe` boots
+  correctly under FS-UAE, byte-identical loaded image vs. the original
+
+**M2 — Inflate backend** (~2–3 weeks)
+- Host-side raw-DEFLATE encoder (vendor or Zig-native)
+- Depacker stub adapted/ported from `inflate.S` (license permitting) or
+  clean-room otherwise
+- Safety-margin verification for in-place decompression
+- **Deliverable:** `execram pack --backend=inflate` — smaller, correctly
+  booting executables; first ratio/speed benchmark numbers recorded
+
+**M3 — ZX0 backend** (~2–3 weeks)
+- Vendor/port ZX0's optimal-parse compressor
+- Adapt/port `unzx0_68000` as the depacker stub
+- `--backend=auto` (compress with every backend, keep the smallest)
+- **Deliverable:** three working backends + benchmark comparison report
+
+**M4 — Shrinkler-class backend** (~4–8+ weeks, highest effort, now lower-risk)
+- License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
+  is public-domain-equivalent and the rest of its codebase is permissive
+  attribution-only — so this backend may directly study/adapt/port
+  Shrinkler's actual compressor design and depacker asm (crediting per
+  `docs/LICENSES.md`), rather than being restricted to a clean-room
+  reimplementation from the algorithm description
+- Host: LZ77 + adaptive range coder + context modeling + optimal parsing
+  (port or reimplement in Zig, informed directly by Shrinkler's source)
+- 68k range-decoder + copy-loop stub, hand-tuned, adapted from
+  `ShrinklerDecompress.S` where useful
+- **Deliverable:** fourth backend competitive with Shrinkler's ratio class
+  (a target, not a guarantee — still the long pole of the whole project,
+  but the legal uncertainty that made it the highest-risk milestone is gone)
+
+**M5 — Unified CLI polish** (~1–2 weeks)
+- `execram pack [--backend=...] [--mem=chip|fast] [-v] in out`
+- `execram info` (inspect a packed executable)
+- Host-side reference decompressor per backend for pre-flight self-check
+
+**M6 — Test matrix & CI** (ongoing from M1)
+- Corpus of rights-cleared real + synthetic executables
+- Headless FS-UAE boot pass/fail per corpus item per backend
+- Ratio/speed regression tracking in CI
+
+**M7 — Docs & release**
+- README, format spec, per-backend algorithm notes, contribution guide
+- v1.0 once Inflate + ZX0 are solid; Shrinkler-class ships as v1.x
+
+## 8. Testing strategy
+
+- **Round-trip tests** (host-only, fast): pack then run each backend's
+  host-side reference decompressor, diff against the original flattened
+  image.
+- **Boot tests** (real fidelity): headless FS-UAE runs the packed
+  executable and confirms success via a serial-port sentinel or in-memory
+  CRC check — this is the only way to catch relocation, memory-type
+  (CHIP/FAST), or stub-timing bugs that a host-side diff can't see.
+- **Corpus**: a small, growing set of real and synthetic executables,
+  rerun on every backend on every CI run, with ratio numbers tracked over
+  time (regression = CI failure).
+
+## 9. Risks
+
+| Risk | Mitigation |
+|---|---|
+| Licensing incompatibility on any adapted 68k source | Resolved by the M0 audit (`docs/LICENSES.md`) — all four backends' reference sources are permissive or public-domain; re-verify against the exact commit pinned in the audit before vendoring, since none are tagged releases |
+| 68k stub size/speed budget blown | Hand-tune in assembly from the start; track stub size as a CI-visible metric per backend |
+| In-place decompression overlap bugs | Verified safety-margin math per backend; separate-buffer mode until verified; UAE boot tests as the ultimate check |
+| Hunk format edge cases (multi-hunk cross-relocs, resident libs, overlays) | Explicit non-goals for v1 (overlays); broad corpus testing for the rest |
+| Shrinkler-class backend (M4) is a big, open-ended effort | Sequenced last, after two working simpler backends de-risk the shared pipeline; treated as its own project phase with its own timeline slack |
+| Zig 0.16 has no mature m68k/AmigaOS backend | Sidestepped entirely — 68k stubs are hand-written asm assembled by vasm, not Zig-compiled |
+| Legal Kickstart ROM access for testing | Document acceptable sources (e.g., Cloanto Amiga Forever, user-owned ROM dump) in `docs/`; never redistribute ROM images |
+
+## 10. Open questions for later phases
+
+- CPU-tiered stubs (plain 68000 vs. 68020+ with better addressing modes),
+  as Shrinkler offers — worth adding once one backend is solid.
+- Whether to expose a library API (not just CLI) for integration into
+  other build pipelines.
+- AmigaOS-native build of the host tool, for on-Amiga cross-development.
