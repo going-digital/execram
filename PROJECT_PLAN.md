@@ -187,8 +187,14 @@ PROJECT_PLAN.md                 this file
   actual execram-packed executables instead of the sentinel.
 
 **M1 — Hunk engine + store backend** (~2–3 weeks)
-- `hunk.zig`: parse HUNK_HEADER/CODE/DATA/BSS/RELOC32(+16/8 variants)/
-  SYMBOL/DEBUG/END; detect and reject HUNK_OVERLAY
+- ~~`hunk.zig`~~ ✅ done — parses HUNK_HEADER/CODE/DATA/BSS/RELOC32/
+  SYMBOL/DEBUG/END; rejects HUNK_OVERLAY, subset load ranges, extended
+  memory flags, and RELOC16/8/RELOC32SHORT (all explicit v0 non-goals,
+  not silently mishandled). Tested against a real vlink-linked executable
+  (`tests/fixtures/basic.s`, assembled+linked at `zig build test` time —
+  see `docs/LICENSES.md` §5 for vlink's license, same terms as vasm),
+  not just hand-rolled bytes, so the parser is checked against another
+  tool's independent understanding of the format.
 - `flatten.zig`: merge hunks into one image, rewrite relocations into a
   flat, compressible stream
 - `store` backend (no compression) proves the full pipeline end-to-end

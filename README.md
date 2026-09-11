@@ -13,18 +13,21 @@ covering the reference implementations this project builds on.
 
 Requires [Zig 0.16](https://ziglang.org/) and
 [vasm](http://sun.hasenbraten.de/vasm/) (the `m68k`/`mot` build, i.e. the
-`vasmm68k_mot` binary) on `PATH`.
+`vasmm68k_mot` binary) on `PATH`. `zig build test` additionally needs
+[vlink](http://sun.hasenbraten.de/vlink/) on `PATH` to link the real
+test-fixture executables `src/hunk.zig`'s tests run against — plain
+`zig build`/`zig build run` don't need it.
 
 ```sh
 zig build              # build ./zig-out/bin/execram
-zig build test         # run unit tests
+zig build test         # run unit tests (needs vlink too, see above)
 zig build run -- pack  # build and run
 ```
 
-If `vasmm68k_mot` isn't on `PATH`, point at it explicitly:
+If `vasmm68k_mot`/`vlink` aren't on `PATH`, point at them explicitly:
 
 ```sh
-zig build -Dvasm=/path/to/vasmm68k_mot
+zig build -Dvasm=/path/to/vasmm68k_mot -Dvlink=/path/to/vlink
 ```
 
 ## Status

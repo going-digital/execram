@@ -128,7 +128,9 @@ Unlicense (public domain), per the repo's `COPYING` file and the README's
 directly with no notice obligations (though we'll still credit it in
 `docs/algorithm-notes/` as a matter of good practice, not legal necessity).
 
-## 5. vasm (build-time assembler dependency)
+## 5. vasm and vlink (build/test-time toolchain dependencies)
+
+### vasm
 
 Per the official manual ("1.3 Legal", `sun.hasenbraten.de/vasm`):
 
@@ -151,6 +153,29 @@ redistribution of vasm as a tool), we will **not vendor vasm's binary or
 source in this repo** — it's documented as an external build-time
 toolchain requirement (`docs/` install notes), same as requiring a C
 compiler.
+
+### vlink
+
+Verified against `vlink.texi` in the upstream source (Frank Wille,
+2025-vintage source pulled 2026-09-11), section "Legal":
+
+```
+vlink is copyright 1995-2025 by Frank Wille.
+
+This archive may be redistributed without modifications and used
+for non-commercial purposes.
+
+An exception for commercial usage is granted, provided that the
+target OS is AmigaOS/68k. Resulting binaries may be distributed
+commercially without further licensing.
+
+In all other cases you need my written consent.
+```
+
+Same terms and same exception as vasm, and for the same reason: our
+target is AmigaOS/68k. Used the same way — external build/test-time
+tool (M1 uses it to link test-fixture executables for `hunk.zig`'s unit
+tests), never vendored in this repo.
 
 ## 6. Decisions this audit changes vs. the original plan
 
@@ -196,6 +221,7 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | unzx0_68000 | zlib | Yes | Retain notice; don't misrepresent origin |
 | Keir Fraser `inflate.S` | Unlicense (public domain) | Yes | None |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
+| vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 
 **Net effect: no clean-room reimplementation is legally required for any
 of the four backends.** We can adapt existing source for all of them,

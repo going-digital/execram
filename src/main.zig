@@ -1,6 +1,10 @@
 const std = @import("std");
 const Io = std.Io;
 
+test {
+    _ = @import("hunk.zig");
+}
+
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
 /// `stub_example` is the assembled bytes of stubs/example/hello.s, embedded
 /// at build time by build.zig. Real backends replace this in later
