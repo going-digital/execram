@@ -195,8 +195,15 @@ PROJECT_PLAN.md                 this file
   see `docs/LICENSES.md` §5 for vlink's license, same terms as vasm),
   not just hand-rolled bytes, so the parser is checked against another
   tool's independent understanding of the format.
-- `flatten.zig`: merge hunks into one image, rewrite relocations into a
-  flat, compressible stream
+- ~~`flatten.zig`~~ ✅ done — merges non-BSS hunks into one code_data
+  buffer (stable-reordered so BSS ends up contiguous at the tail
+  regardless of original hunk order), folds each relocation's
+  target-hunk offset into the stored value at flatten time (so the
+  runtime stub only ever needs to add one thing: the final load
+  address), and encodes the result per `docs/format-spec.md` §7. Tested
+  against the same real fixture as `hunk.zig`, with hand-computed
+  expected byte values, plus synthetic negative-path tests for
+  out-of-range/misaligned relocations.
 - `store` backend (no compression) proves the full pipeline end-to-end
 - **Deliverable:** `execram pack --backend=store in.exe out.exe` boots
   correctly under FS-UAE, byte-identical loaded image vs. the original

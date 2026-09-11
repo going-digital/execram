@@ -3,6 +3,7 @@ const Io = std.Io;
 
 test {
     _ = @import("hunk.zig");
+    _ = @import("flatten.zig");
 }
 
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
