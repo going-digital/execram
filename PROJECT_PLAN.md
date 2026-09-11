@@ -171,7 +171,11 @@ PROJECT_PLAN.md                 this file
   `stubs/<name>/*.s` with vasm into a raw binary and embeds it via
   `@embedFile`; proven end to end with a placeholder stub
   (`stubs/example/hello.s`) and a unit test asserting the exact bytes
-- Container/stub format v0 documented in `docs/format-spec.md`
+- ~~Container/stub format v0 documented~~ ✅ done — see
+  [`docs/format-spec.md`](docs/format-spec.md): header layout, the
+  code+data/BSS/reloc-stream split that keeps backends reloc-agnostic,
+  the v0 runtime algorithm (always a separate scratch+final buffer, no
+  safety margin needed yet), and what's still unsettled going into M1
 - ~~FS-UAE test harness bootstrapped~~ ✅ done — `tests/uae/run_boot_test.sh`
   assembles a bare-metal boot block (`tests/uae/boot/sentinel.s`, no
   filesystem/Exec/DOS dependency), packs it into a bootable ADF, boots it
