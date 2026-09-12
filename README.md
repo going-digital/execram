@@ -35,8 +35,9 @@ zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=
 
 ## Status
 
-M1 and M2 done (store and inflate backends both pack and boot real
+M1-M3 done (store, inflate, and zx0 backends all pack and boot real
 executables correctly, verified under FS-UAE) — see the milestones in
 [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). `execram pack
-[--backend=store|inflate] <in> <out>` works today; zx0/shrinkler land in
-later milestones.
+[--backend=store|inflate|zx0|auto] <in> <out>` works today (`auto`, the
+default, tries every backend and keeps the smallest result); shrinkler
+lands in a later milestone.

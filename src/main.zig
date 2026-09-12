@@ -6,6 +6,7 @@ const flatten = @import("flatten.zig");
 const container = @import("container.zig");
 const store = @import("backends/store.zig");
 const inflate = @import("backends/inflate.zig");
+const zx0 = @import("backends/zx0.zig");
 
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
 /// Real backends replace this in later milestones (see PROJECT_PLAN.md).
@@ -15,15 +16,20 @@ const stub_example = @embedFile("stub_example");
 /// build time (build.zig).
 const stub_store = @embedFile("stub_store");
 const stub_inflate = @embedFile("stub_inflate");
+const stub_zx0 = @embedFile("stub_zx0");
+
+const backend_names = [_][]const u8{ "store", "inflate", "zx0" };
 
 const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack [--backend=store|inflate] <in> <out>
+    \\  execram pack [--backend=store|inflate|zx0|auto] <in> <out>
     \\  execram info <packed-exe>
     \\
-    \\zx0/shrinkler land in later milestones - see PROJECT_PLAN.md.
+    \\--backend=auto (the default) tries every backend and keeps
+    \\whichever produces the smallest output. shrinkler lands in a
+    \\later milestone - see PROJECT_PLAN.md.
     \\
 ;
 
@@ -51,7 +57,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
-    var backend_name: []const u8 = "store";
+    var backend_name: []const u8 = "auto";
     var positional: std.ArrayList([]const u8) = .empty;
     for (args) |arg| {
         if (std.mem.startsWith(u8, arg, "--backend=")) {
@@ -61,7 +67,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zx0|auto] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -77,21 +83,48 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     var image = try flatten.flatten(arena, file);
     defer image.deinit();
 
+    const exe_bytes, const used_backend = if (std.mem.eql(u8, backend_name, "auto"))
+        try packAuto(arena, image)
+    else
+        .{ try packWithBackend(arena, image, backend_name), backend_name };
+
+    try cwd.writeFile(io, .{ .sub_path = out_path, .data = exe_bytes });
+
+    std.log.info("packed {s} -> {s} (--backend={s}, {d} -> {d} bytes)", .{
+        in_path, out_path, used_backend, input_bytes.len, exe_bytes.len,
+    });
+}
+
+/// Tries every backend in `backend_names` and returns the smallest
+/// resulting output, along with which backend produced it - Shrinkler's
+/// own "just try it" approach to backend selection (PROJECT_PLAN.md M3).
+fn packAuto(arena: std.mem.Allocator, image: flatten.FlatImage) !struct { []u8, []const u8 } {
+    var best: ?[]u8 = null;
+    var best_name: []const u8 = "";
+    for (backend_names) |name| {
+        const candidate = try packWithBackend(arena, image, name);
+        if (best == null or candidate.len < best.?.len) {
+            best = candidate;
+            best_name = name;
+        }
+    }
+    return .{ best.?, best_name };
+}
+
+fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8) ![]u8 {
     const payload, const backend_id, const stub_bytes = if (std.mem.eql(u8, backend_name, "store"))
         .{ try store.compress(arena, image), container.BackendId.store, stub_store }
     else if (std.mem.eql(u8, backend_name, "inflate"))
         .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate }
+    else if (std.mem.eql(u8, backend_name, "zx0"))
+        .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0 }
     else {
-        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate' exist so far", .{backend_name});
+        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zx0'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
     };
 
     const container_bytes = try container.buildContainer(arena, image, backend_id, stub_bytes, payload);
-    const exe_bytes = try container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
-
-    try cwd.writeFile(io, .{ .sub_path = out_path, .data = exe_bytes });
-
-    std.log.info("packed {s} -> {s} ({d} -> {d} bytes)", .{ in_path, out_path, input_bytes.len, exe_bytes.len });
+    return container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
 }
 
 fn printUsage(io: Io) !void {
@@ -113,4 +146,5 @@ test {
     _ = container;
     _ = store;
     _ = inflate;
+    _ = zx0;
 }

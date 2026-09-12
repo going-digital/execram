@@ -96,6 +96,12 @@ Commit audited: `ecde3a2ae05061fe06469ed46df81a33b7de7d86`
 Both are fine to vendor/adapt directly, honoring their respective notices
 (BSD-3's attribution clauses for the compressor; zlib's for the depacker).
 
+Vendored in M3: the compressor (unmodified) at
+`src/backends/zx0_vendor/`. The 68k depacker actually used is
+Emmanuel Marty's separate `unzx0_68000` (§3 below), not the asm shipped
+in this repo - `unzx0_68000`'s own README recommends pairing it with
+this repo's or Salvador's compressor.
+
 ## 3. unzx0_68000 — `emmanuel-marty/unzx0_68000`
 
 Commit audited: `c807773edffae8b12155a980d8031ef7701ccfa1`
@@ -118,6 +124,10 @@ freely, subject to the following restrictions:
 
 Fully permissive for our use (adapt as the ZX0 depacker stub); just keep
 the notice in the stub source and don't claim we wrote the original.
+
+Vendored in M3 at `stubs/zx0/unzx0_68000.s`, with the entry label
+renamed to `Depack` (the one deliberate change - see that file's header
+comment) to match `stubs/common/runtime.i`'s calling convention.
 
 ## 4. Keir Fraser's `inflate.S` and `bootblock.S` — `keirf/Amiga-Stuff`
 

@@ -268,11 +268,35 @@ PROJECT_PLAN.md                 this file
   any compression benefit. First real ratio data is still outstanding;
   a good candidate task before or alongside M3.
 
-**M3 — ZX0 backend** (~2–3 weeks)
-- Vendor/port ZX0's optimal-parse compressor
-- Adapt/port `unzx0_68000` as the depacker stub
-- `--backend=auto` (compress with every backend, keep the smallest)
-- **Deliverable:** three working backends + benchmark comparison report
+**M3 — ZX0 backend** ✅ done
+- ~~Vendor/port ZX0's optimal-parse compressor~~ — vendored unmodified
+  (`src/backends/zx0_vendor/`, BSD-3-Clause), called via Zig's C
+  interop (`@cImport`) rather than reimplementing the optimal-parse
+  algorithm. One deliberate patch: `optimize.c`'s progress-dot
+  `printf`/`fflush(stdout)` calls are removed - they don't just clutter
+  our own CLI's output, they actively **deadlocked `zig build test`**,
+  since raw stdout bytes corrupt the same channel Zig's test runner
+  protocol uses to talk to the test binary. Found by sampling both
+  processes' stacks mid-hang (both blocked waiting to read a message
+  the other would never send) and tracing it to that printf - see
+  `src/backends/zx0_vendor/optimize.c`'s comment.
+- ~~Adapt `unzx0_68000` as the depacker stub~~ — the easiest of the
+  three so far: already plain Motorola/Devpac syntax (no dialect
+  workaround needed, unlike inflate), and its calling convention (A0 =
+  input, A1 = output, preserves A2) already matches `runtime.i`'s
+  contract almost exactly. One deliberate change: renamed the entry
+  label to `Depack`.
+- ~~`--backend=auto`~~ — tries every backend, keeps the smallest
+  output. Confirmed correctly picking `store` for the tiny hand-written
+  e2e test program (256B input; inflate/zx0's fixed stub overhead
+  exceeds any compression benefit at that size, as flagged as an open
+  question back in M2).
+- ~~**Deliverable**~~ ✅ three working backends, each verified the same
+  two ways as M1/M2 (byte-level + a real FS-UAE boot of the packed test
+  program under Kickstart 1.3). Benchmark comparison report on a real,
+  substantial program is still outstanding - same gap flagged at the
+  end of M2, now three milestones deep without one. Should not carry
+  into M4 unaddressed.
 
 **M4 — Shrinkler-class backend** (~4–8+ weeks, highest effort, now lower-risk)
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)

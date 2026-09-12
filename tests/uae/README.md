@@ -57,7 +57,7 @@ not just the bare sentinel:
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   EXECRAM_TEST_BACKEND=inflate \
-  tests/uae/run_e2e_test.sh   # or EXECRAM_TEST_BACKEND=store (the default)
+  tests/uae/run_e2e_test.sh   # or store/zx0 (script default: store)
 ```
 
 The inflate backend also needs `EXECRAM_VASM_STD` (a `vasmm68k_std`
