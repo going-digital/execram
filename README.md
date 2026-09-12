@@ -38,6 +38,10 @@ zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=
 M1-M3 done (store, inflate, and zx0 backends all pack and boot real
 executables correctly, verified under FS-UAE) — see the milestones in
 [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). `execram pack
-[--backend=store|inflate|zx0|auto] <in> <out>` works today (`auto`, the
-default, tries every backend and keeps the smallest result); shrinkler
-lands in a later milestone.
+[--backend=store|inflate|zultra|zx0|auto] <in> <out>` works today
+(`auto`, the default, tries every backend and keeps the smallest
+result); shrinkler lands in a later milestone.
+
+`zultra` is an alternative, stronger host-side compressor for the same
+container/depacker `inflate` uses (both produce standard raw DEFLATE) —
+see [src/backends/zultra_vendor/README.md](src/backends/zultra_vendor/README.md).

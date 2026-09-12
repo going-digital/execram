@@ -79,15 +79,35 @@ pub fn build(b: *std.Build) void {
     });
     const exe_tests = b.addTest(.{ .root_module = test_module });
 
-    // The zx0 backend's host-side compressor is vendored C (BSD-3 -
-    // docs/LICENSES.md #2), not reimplemented - needed by both modules,
-    // same as the stubs above.
+    // The zx0 and zultra backends' host-side compressors are vendored C
+    // (docs/LICENSES.md #2, #6), not reimplemented - needed by both
+    // modules, same as the stubs above.
     for ([_]*std.Build.Module{ exe_module, test_module }) |mod| {
         mod.link_libc = true;
         mod.addIncludePath(b.path("src/backends/zx0_vendor"));
         mod.addCSourceFiles(.{
             .root = b.path("src/backends/zx0_vendor"),
             .files = &.{ "compress.c", "memory.c", "optimize.c", "shim.c" },
+            .flags = &.{"-std=c99"},
+        });
+
+        mod.addIncludePath(b.path("src/backends/zultra_vendor"));
+        mod.addCSourceFiles(.{
+            .root = b.path("src/backends/zultra_vendor"),
+            .files = &.{
+                "blockdeflate.c",
+                "dictionary.c",
+                "frame.c",
+                "libzultra.c",
+                "matchfinder.c",
+                "huffman/bitwriter.c",
+                "huffman/huffencoder.c",
+                "huffman/huffutils.c",
+                "libdivsufsort/lib/divsufsort.c",
+                "libdivsufsort/lib/divsufsort_utils.c",
+                "libdivsufsort/lib/sssort.c",
+                "libdivsufsort/lib/trsort.c",
+            },
             .flags = &.{"-std=c99"},
         });
     }

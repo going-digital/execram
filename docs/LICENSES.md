@@ -6,7 +6,7 @@ maintainers can relicense future commits.
 
 This audit's one big surprise: **Shrinkler is not GPL.** The whole plan's
 M4 risk assessment assumed it was and treated the algorithm as
-clean-room-only; that assumption was wrong and is corrected below (§5, §6).
+clean-room-only; that assumption was wrong and is corrected below (§1, §7).
 
 ---
 
@@ -192,7 +192,36 @@ target is AmigaOS/68k. Used the same way — external build/test-time
 tool (M1 uses it to link test-fixture executables for `hunk.zig`'s unit
 tests), never vendored in this repo.
 
-## 6. Decisions this audit changes vs. the original plan
+## 6. Zultra — `emmanuel-marty/zultra`
+
+Commit audited: `5490882fd561a8eae93c8004a46d11e641e46a0b`
+
+"A fast deflate implementation with zopfli-like ratios and a streaming
+API" - an alternative host-side compressor for the `inflate` backend's
+existing depacker (M2), producing the same standard raw-DEFLATE format,
+so no new depacker or backend_id is needed. Three licenses apply within
+the vendored subset (core library only, per `src/backends/zultra_vendor/README.md`
+- the reference CLI and its bundled zlib are not vendored, neither is
+needed):
+
+- **Most files:** zlib license (`Copyright (c) 2019 Emmanuel Marty`),
+  verified against `LICENSE.zlib.md` - identical terms to
+  `unzx0_68000` (§3).
+- **`src/matchfinder.c`:** CC0 1.0 Universal (public domain), verified
+  against `LICENSE.cc0.md`.
+- **`src/huffman/huffutils.c`:** Apache License 2.0, verified against
+  `LICENSE.Apache2.0.md`. Permissive but not notice-free like the
+  others: redistribution must retain copyright/attribution notices and
+  mark any modified files as changed. We haven't modified this file, so
+  the retained-notice condition is trivially met by vendoring it as-is.
+- **`src/libdivsufsort/`** (a separate upstream project - Yuta Mori's
+  suffix-array library - vendored inside zultra): MIT license, verified
+  against `src/libdivsufsort/LICENSE`.
+
+All four are permissive with no copyleft; fine to vendor directly,
+honoring each file's own notice per the details above.
+
+## 7. Decisions this audit changes vs. the original plan
 
 The plan (`PROJECT_PLAN.md`) originally assumed Shrinkler was GPL and
 required M4 (the Shrinkler-class backend) to be built purely from a
@@ -215,7 +244,7 @@ reuse. That assumption was wrong:
 `PROJECT_PLAN.md` §3 and §7 (M4) should be updated to reflect this — see
 the accompanying edit.
 
-## 7. Kickstart ROMs (test dependency, not a project dependency)
+## 8. Kickstart ROMs (test dependency, not a project dependency)
 
 The FS-UAE boot tests under `tests/uae/` need a real Kickstart ROM to run
 against. Kickstart ROMs are copyrighted (originally Commodore-Amiga, now
@@ -225,7 +254,7 @@ supplies their own legally-obtained ROM via the `EXECRAM_KICKSTART`
 environment variable (see `tests/uae/README.md`); this is why those tests
 are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 
-## 8. Summary table
+## 9. Summary table
 
 | Component | License | Vendor/adapt OK? | Obligations |
 |---|---|---|---|

@@ -96,7 +96,7 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 | Value | Backend | Milestone |
 |------:|---------|-----------|
 | 0     | store (no compression) | M1 |
-| 1     | inflate (DEFLATE) | M2 |
+| 1     | inflate (DEFLATE) | M2 (also used by the `zultra` CLI backend - an alternative, stronger DEFLATE *encoder* producing the same format for the same depacker; there's no separate `zultra` entry here because the container/stub don't need one) |
 | 2     | zx0 | M3 |
 | 3     | shrinkler-class | M4 |
 | 4-254 | reserved for future backends | |

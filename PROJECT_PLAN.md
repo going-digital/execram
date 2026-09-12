@@ -322,6 +322,26 @@ substring check, but a real difference under this test's byte-exact
 comparison. Confirmed as a harness-only artifact (not a decompression or
 relocation defect) and fixed - see `tests/uae/README.md`.
 
+**Zultra — an alternative "inflate" compressor** ✅ done (unplanned
+addition, between M3 and M4) - vendored
+[emmanuel-marty/zultra](https://github.com/emmanuel-marty/zultra), "a
+fast deflate implementation with zopfli-like ratios." Because it
+produces standard raw DEFLATE, it needed **no new depacker stub or
+backend_id at all** - `--backend=zultra` reuses `inflate`'s exact stub
+and container, just with a stronger host-side encoder feeding it. On
+the large test program (`tests/uae/e2e_large/`): 3556 bytes vs. plain
+`inflate`'s 3620 (61.5% vs. 62.6% of the 5784-byte original) - a real
+but modest improvement, and still well behind zx0's 2928 (50.6%),
+consistent with DEFLATE's format ceiling relative to ZX0's design.
+Verified the same two ways as every other backend: byte-level (Zig's
+own `Decompress` round-trip in `src/backends/zultra.zig`'s test) and
+real hardware (both `tests/uae/run_e2e_test.sh` and the byte-exact
+`run_large_e2e_test.sh` pass with `EXECRAM_TEST_BACKEND=zultra`,
+confirming the *existing, unmodified* inflate stub correctly
+decompresses Zultra's output - exactly the compatibility claim this
+integration rested on). See `src/backends/zultra_vendor/README.md` and
+`docs/LICENSES.md` §6.
+
 **M4 — Shrinkler-class backend** (~4–8+ weeks, highest effort, now lower-risk)
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
   is public-domain-equivalent and the rest of its codebase is permissive

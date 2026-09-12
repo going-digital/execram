@@ -57,12 +57,15 @@ not just the bare sentinel:
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   EXECRAM_TEST_BACKEND=inflate \
-  tests/uae/run_e2e_test.sh   # or store/zx0 (script default: store)
+  tests/uae/run_e2e_test.sh   # or store/zultra/zx0 (script default: store)
 ```
 
-The inflate backend also needs `EXECRAM_VASM_STD` (a `vasmm68k_std`
-build - see `stubs/inflate/README.md`) if it isn't on `PATH` under that
-name already, and `EXECRAM_VLINK` if `vlink` isn't on `PATH`.
+The inflate and zultra backends also need `EXECRAM_VASM_STD` (a
+`vasmm68k_std` build - see `stubs/inflate/README.md`) if it isn't on
+`PATH` under that name already, and `EXECRAM_VLINK` if `vlink` isn't on
+`PATH`. (`zultra` uses `inflate`'s exact same stub - see
+`src/backends/zultra_vendor/README.md` - so it needs `vasmm68k_std` for
+the same reason `inflate` does, not a reason of its own.)
 
 It builds `execram`, links `e2e/program.s` (a small program with both a
 cross-hunk and a self-hunk relocation) into a real executable, packs it
@@ -123,7 +126,7 @@ existing at all (see `PROJECT_PLAN.md` M1-M3).
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   EXECRAM_TEST_BACKEND=zx0 \
-  tests/uae/run_large_e2e_test.sh   # or store/inflate (script default: auto)
+  tests/uae/run_large_e2e_test.sh   # or store/inflate/zultra (script default: auto)
 ```
 
 The jump from a one-line sentinel to a multi-KB exact-match transcript
