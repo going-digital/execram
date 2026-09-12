@@ -298,6 +298,23 @@ pub fn build(b: *std.Build) void {
     // exercises an FPU opcode.
     bench_module.addCSourceFile(.{ .file = b.path("src/musashi_vendor/softfloat/softfloat.c"), .flags = &.{} });
 
+    // A minimal fake Exec (AllocMem/FreeMem only) so tools/bench can
+    // also run the inflate/zultra stub - its Depack: is the only one
+    // that calls into real Exec library functions for its own scratch
+    // memory (see tools/bench/fake_exec.s's own module doc for the
+    // full design and why it's safe to be this minimal). Assembled the
+    // same way as every real stub above.
+    const fake_exec_assemble = b.addSystemCommand(&.{
+        vasm,
+        "-Fbin",
+        "-no-opt",
+        "-quiet",
+    });
+    fake_exec_assemble.addFileArg(b.path("tools/bench/fake_exec.s"));
+    fake_exec_assemble.addArg("-o");
+    const fake_exec_bin = fake_exec_assemble.addOutputFileArg("fake_exec.bin");
+    bench_module.addAnonymousImport("fake_exec", .{ .root_source_file = fake_exec_bin });
+
     const bench_exe = b.addExecutable(.{ .name = "execram-bench", .root_module = bench_module });
     const run_bench = b.addRunArtifact(bench_exe);
     if (b.args) |args| run_bench.addArgs(args);

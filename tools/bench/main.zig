@@ -51,6 +51,13 @@ const listing_inflate = @embedFile("stub_inflate_listing");
 const listing_zx0 = @embedFile("stub_zx0_listing");
 const listing_shrinkler = @embedFile("stub_shrinkler_listing");
 
+// A minimal fake Exec (AllocMem/FreeMem only) - see fake_exec.s's own
+// module doc for the full design. Only inflate/zultra's stub actually
+// calls into it; every other stub's Depack: is fully self-contained
+// and never touches address 4 (ExecBase) at all, so writing this in
+// unconditionally for every run is harmless.
+const fake_exec = @embedFile("fake_exec");
+
 const StubEntry = struct {
     known: info.KnownStub,
     listing: []const u8,
@@ -77,6 +84,21 @@ const PAL_CPU_HZ: f64 = PAL_COLOR_CLOCK_HZ * 2.0;
 /// costs nothing but static .bss in this native host tool.
 const MEM_SIZE: usize = 16 * 1024 * 1024;
 var mem: [MEM_SIZE]u8 = undefined;
+
+// Where fake_exec.s's tiny AllocMem/FreeMem routines live, and the
+// fixed scratch address AllocMem always hands back (must match
+// tools/bench/scratch_addr.i's own copy of FAKE_EXEC_SCRATCH_BASE -
+// see that file's header comment). Everything from FAKE_EXEC_CODE_BASE
+// upward is reserved exclusively for this - the dynamic stub/payload/
+// output/stack layout below is never allowed to reach it (checked at
+// runtime, not just by convention), and 7MB is enormously more
+// headroom than any packed executable this project has ever produced
+// (the largest, tests/corpus/hexagon.exe, resolves to 221KB) needs.
+const FAKE_EXEC_CODE_BASE: u32 = 0x00700000;
+const FAKE_EXEC_SCRATCH_BASE: u32 = 0x00710000;
+// stubs/common/header.i's real Exec LVO constants - ExecBase-210 is
+// FreeMem's entry, ExecBase-198 is AllocMem's (see fake_exec.s).
+const EXEC_FREEMEM_LVO: u32 = 210;
 
 export fn m68k_read_memory_8(address: c_uint) callconv(.c) c_uint {
     return if (address < MEM_SIZE) mem[address] else 0;
@@ -181,7 +203,11 @@ pub fn main(init: std.process.Init) !void {
     const output_base: u32 = std.mem.alignForward(u32, payload_base + @as(u32, @intCast(payload.len)), 4);
     const stack_size: u32 = 16384;
     const stack_top: u32 = std.mem.alignForward(u32, output_base + uncompressed_size, 4) + stack_size;
-    if (stack_top >= MEM_SIZE) return error.PackedFileTooLargeForBenchMemory;
+    // Bounded by FAKE_EXEC_CODE_BASE, not MEM_SIZE: that whole upper
+    // region is reserved for fake_exec.s and its scratch buffer (see
+    // those constants' own comment) and must never overlap this
+    // dynamic layout.
+    if (stack_top >= FAKE_EXEC_CODE_BASE) return error.PackedFileTooLargeForBenchMemory;
 
     // A sentinel return address, not a real one: chosen far past
     // anything this harness ever places in `mem`, so it can never
@@ -194,10 +220,16 @@ pub fn main(init: std.process.Init) !void {
     @memset(&mem, 0);
     @memcpy(mem[stub_base..][0..stub_len], header.stub.bytes);
     @memcpy(mem[payload_base..][0..payload.len], payload);
+    @memcpy(mem[FAKE_EXEC_CODE_BASE..][0..fake_exec.len], fake_exec);
 
     c.m68k_init();
     c.m68k_set_cpu_type(c.M68K_CPU_TYPE_68000);
     c.m68k_pulse_reset();
+
+    // ExecBase, read by inflate/zultra's Depack: via `move.l 4.w,a6` -
+    // every other stub never reads address 4 at all, so setting this
+    // unconditionally is harmless for them.
+    m68k_write_memory_32(4, FAKE_EXEC_CODE_BASE + EXEC_FREEMEM_LVO);
 
     const sp = stack_top - 4;
     m68k_write_memory_32(sp, trampoline);

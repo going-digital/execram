@@ -41,8 +41,11 @@ Given a real `execram pack` output file, this tool:
 3. Loads the stub and payload into Musashi's emulated memory, sets up
    registers exactly per `stubs/common/runtime.i`'s calling convention
    (A0 = payload, A1 = output buffer, D0 = compressed size), and jumps
-   straight into `Depack:` - bypassing `Start:`/`AllocMem`/relocation
-   entirely, since those aren't what a backend choice actually changes.
+   straight into `Depack:` - bypassing `Start:`/relocation entirely,
+   since those aren't what a backend choice actually changes (a
+   minimal fake Exec - `fake_exec.s` - is loaded too, since one stub
+   does still call into real `AllocMem`/`FreeMem` from inside its own
+   `Depack:`; see below).
 4. Runs to completion and sums the exact cycle cost.
 5. Cross-checks the emulated output against that backend's own
    independent host-side `decompress` (the same one `execram`'s own
@@ -78,6 +81,41 @@ cycles for a 68000) before executing anything real, regardless of the
 requested budget - a throwaway `m68k_execute(0)` absorbs that outside
 the real measurement.
 
+## The fake Exec (`fake_exec.s`)
+
+Every stub's `Depack:` is a pure, self-contained CPU routine exactly
+matching `stubs/common/runtime.i`'s contract *except* inflate/zultra's:
+it calls real `AllocMem`/`FreeMem` via `ExecBase` (`move.l 4.w,a6`) to
+get its own ~2.9KB scratch block, because `inflate.S`'s
+`OPT_STORAGE_OFFSTACK` convention needs that memory from somewhere
+other than the stack. Confirmed directly, not guessed: with no Exec
+library at all, that call jumped into whatever (zeroed) memory sat at
+a huge negative offset from a null base, and the CPU spun there
+decoding zeros until the step-limit safety valve tripped - while every
+other backend already produced an exact cycle count with a verified
+`MATCH`.
+
+`fake_exec.s` is a real, if tiny, 68k routine - not a Zig-side special
+case - assembled by vasm exactly like a real stub and loaded into a
+reserved high region of emulated memory (`0x00700000` up), with
+`ExecBase` (address 4) pointed at it. It only ever needs to support
+`AllocMem`/`FreeMem`, and only correctly enough for how this harness
+actually drives a stub: one isolated `Depack:` call per run, which for
+the only stub that calls `AllocMem` at all means exactly one
+`AllocMem`+matching `FreeMem` pair, never two overlapping live
+allocations. That means a real allocator isn't needed - `AllocMem`
+always hands back the same fixed scratch address, and `FreeMem` is a
+no-op - see that file's own header comment for the exact memory layout
+(the 12-byte gap between the `FreeMem`/`AllocMem` entry points is
+architecturally required, not a free choice: it's the real difference
+between those two Exec LVO numbers).
+
+Verified with the same rigor as every other backend: an exact cycle
+count plus a `MATCH` against inflate/zultra's own host-side
+`decompress`, and re-confirmed the other four backends (which never
+touch `ExecBase` at all) produce byte-identical cycle counts before
+and after this was added.
+
 ## Known limitations
 
 Musashi models CPU instruction timing only - it has no concept of Chip
@@ -89,32 +127,6 @@ for comparing backends against each other on equal footing, not a
 prediction of exact real-hardware wall-clock time. `tests/uae/` remains
 the source of truth for anything that needs to be exactly right,
 including timing claims that matter.
-
-**The `inflate`/`zultra` stub doesn't work with this tool yet.** Every
-other backend's `Depack:` is a pure, self-contained CPU routine exactly
-matching `stubs/common/runtime.i`'s contract - jumping straight into it
-with no surrounding OS environment is enough. `stubs/inflate/stub.s`'s
-`Depack:` isn't: it calls real `AllocMem`/`FreeMem` via `ExecBase`
-(`move.l 4.w,a6`) to get its own ~2.9KB scratch block, because
-`inflate.S`'s `OPT_STORAGE_OFFSTACK` convention needs that memory from
-somewhere other than the stack. This harness provides no `ExecBase`,
-no Exec library, nothing at address 4 - so that call jumps into
-whatever (zeroed) memory sits at a huge negative offset from a null
-base, and the CPU spins there, decoding zeros, until the step-limit
-safety valve trips (`error: DepackNeverReturned`). Confirmed to be
-exactly this, not a cycle-counting bug: every other backend produces
-an exact cycle count with a verified `MATCH` against that backend's
-own host-side `decompress`.
-
-Fixing this needs a minimal fake Exec: a tiny hand-written `AllocMem`/
-`FreeMem` implementation (a bump allocator over a fixed scratch region
-is enough - inflate never frees anything it can't immediately give
-back) installed at the `EXEC_AllocMem`/`EXEC_FreeMem` offsets from
-whatever address `ExecBase` (read from address 4) is set to point at,
-plus writing that pointer into the emulated memory before jumping into
-`Depack:`. Not yet done - out of scope for what this tool needed to
-prove first (the cycle-counting technique itself, and that it works
-end to end for three of the four backend families).
 
 ## Usage
 
