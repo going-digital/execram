@@ -89,6 +89,14 @@ Likewise, `salvador` is an alternative host-side compressor for the same
 container/depacker `zx0` uses (both produce the same ZX0 v2 format) —
 see [src/backends/salvador_vendor/README.md](src/backends/salvador_vendor/README.md).
 
+`zig build bench -- <packed-exe>` predicts a packed executable's exact
+68000 depack cost in CPU cycles, via a standalone Musashi-based
+emulation harness (`tools/bench/`) instead of FS-UAE's real-time-paced
+boot process - useful for comparing backends' decompression speed
+without host-load noise, though it's a best-case lower bound (no chip
+RAM bus-contention modeling) rather than a wall-clock prediction. See
+[tools/bench/README.md](tools/bench/README.md).
+
 ## Documentation
 
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) - architecture, milestones, and the reasoning behind each

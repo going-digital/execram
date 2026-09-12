@@ -40,6 +40,83 @@ pub const InfoError = error{
     BadMagic,
 } || hunk.ParseError || Io.Writer.Error;
 
+/// Every field of docs/format-spec.md §3's header, plus where it and the
+/// matched stub actually sit within `container_data` - split out of
+/// `printInfo` so a second caller (tools/bench, which needs the raw
+/// field values and byte offsets, not a formatted report) can reuse the
+/// exact same "locate the header reliably" logic rather than
+/// re-deriving it and risking the two drifting apart.
+pub const Header = struct {
+    stub: KnownStub,
+    /// == stub.bytes.len: where the header starts within container_data.
+    header_offset: usize,
+    version_major: u8,
+    version_minor: u8,
+    backend_id: u8,
+    flags: u8,
+    header_size: u16,
+    code_data_size: u32,
+    bss_size: u32,
+    reloc_stream_size: u32,
+    compressed_size: u32,
+    safety_margin: u32,
+
+    pub fn memChip(self: Header) bool {
+        return self.flags & FLAG_MEM_CHIP != 0;
+    }
+    pub fn hasRelocs(self: Header) bool {
+        return self.flags & FLAG_HAS_RELOCS != 0;
+    }
+    /// Bytes a backend's decompressor must produce from `compressed_size`
+    /// bytes of payload (docs/format-spec.md §6: code+data, then the
+    /// reloc stream, back to back).
+    pub fn uncompressedSize(self: Header) u32 {
+        return self.code_data_size + self.reloc_stream_size;
+    }
+    pub fn residentSize(self: Header) u32 {
+        return self.code_data_size + self.bss_size;
+    }
+    /// Where the compressed payload starts within `container_data`.
+    pub fn payloadOffset(self: Header) usize {
+        return self.header_offset + self.header_size;
+    }
+};
+
+/// Matches `container_data`'s leading bytes against each of
+/// `known_stubs` (see that type's doc comment on why a literal prefix
+/// match, not a magic-byte scan) and parses the header immediately
+/// following the match.
+pub fn locateHeader(container_data: []const u8, known_stubs: []const KnownStub) !Header {
+    const stub = for (known_stubs) |candidate| {
+        if (container_data.len >= candidate.bytes.len and
+            std.mem.eql(u8, container_data[0..candidate.bytes.len], candidate.bytes))
+        {
+            break candidate;
+        }
+    } else return error.UnrecognizedStub;
+
+    if (container_data.len < stub.bytes.len + HEADER_SIZE) return error.TruncatedHeader;
+    const h = container_data[stub.bytes.len..][0..HEADER_SIZE];
+
+    const magic = std.mem.readInt(u32, h[0..4], .big);
+    if (magic != MAGIC) return error.BadMagic;
+
+    return .{
+        .stub = stub,
+        .header_offset = stub.bytes.len,
+        .version_major = h[4],
+        .version_minor = h[5],
+        .backend_id = h[6],
+        .flags = h[7],
+        .header_size = std.mem.readInt(u16, h[8..10], .big),
+        .code_data_size = std.mem.readInt(u32, h[12..16], .big),
+        .bss_size = std.mem.readInt(u32, h[16..20], .big),
+        .reloc_stream_size = std.mem.readInt(u32, h[20..24], .big),
+        .compressed_size = std.mem.readInt(u32, h[24..28], .big),
+        .safety_margin = std.mem.readInt(u32, h[28..32], .big),
+    };
+}
+
 /// Parses `exe_bytes` (a whole file's contents) and writes a
 /// human-readable report to `w`. `known_stubs` should be every stub
 /// this build of execram knows how to produce (main.zig's embedded
@@ -59,53 +136,29 @@ pub fn printInfo(
         return error.NotASingleCodeHunkFile;
     }
     const container_data = file.hunks[0].data;
+    const header = try locateHeader(container_data, known_stubs);
 
-    const stub = for (known_stubs) |candidate| {
-        if (container_data.len >= candidate.bytes.len and
-            std.mem.eql(u8, container_data[0..candidate.bytes.len], candidate.bytes))
-        {
-            break candidate;
-        }
-    } else return error.UnrecognizedStub;
-
-    if (container_data.len < stub.bytes.len + HEADER_SIZE) return error.TruncatedHeader;
-    const h = container_data[stub.bytes.len..][0..HEADER_SIZE];
-
-    const magic = std.mem.readInt(u32, h[0..4], .big);
-    if (magic != MAGIC) return error.BadMagic;
-
-    const version_major = h[4];
-    const version_minor = h[5];
-    const backend_id = h[6];
-    const flags = h[7];
-    const header_size = std.mem.readInt(u16, h[8..10], .big);
-    const code_data_size = std.mem.readInt(u32, h[12..16], .big);
-    const bss_size = std.mem.readInt(u32, h[16..20], .big);
-    const reloc_stream_size = std.mem.readInt(u32, h[20..24], .big);
-    const compressed_size = std.mem.readInt(u32, h[24..28], .big);
-    const safety_margin = std.mem.readInt(u32, h[28..32], .big);
-
-    const mem_chip = flags & FLAG_MEM_CHIP != 0;
-    const has_relocs = flags & FLAG_HAS_RELOCS != 0;
-    const uncompressed_size = code_data_size + reloc_stream_size;
-    const resident_size = code_data_size + bss_size;
+    const mem_chip = header.memChip();
+    const has_relocs = header.hasRelocs();
+    const uncompressed_size = header.uncompressedSize();
+    const resident_size = header.residentSize();
 
     try w.print("execram container (v{d}.{d}, stub \"{s}\", {d} bytes)\n", .{
-        version_major, version_minor, stub.stub_name, stub.bytes.len,
+        header.version_major, header.version_minor, header.stub.stub_name, header.stub.bytes.len,
     });
-    try w.print("  backend_id:          {d} ({s})\n", .{ backend_id, backendIdName(backend_id) });
+    try w.print("  backend_id:          {d} ({s})\n", .{ header.backend_id, backendIdName(header.backend_id) });
     try w.print("  memory:              {s}\n", .{if (mem_chip) "chip" else "any/fast"});
     try w.print("  relocations:         {s}\n", .{if (has_relocs) "yes" else "none"});
-    try w.print("  header size:         {d} bytes\n", .{header_size});
-    try w.print("  code+data size:      {d} bytes\n", .{code_data_size});
-    try w.print("  bss size:            {d} bytes\n", .{bss_size});
-    try w.print("  reloc stream size:   {d} bytes\n", .{reloc_stream_size});
-    try w.print("  compressed size:     {d} bytes\n", .{compressed_size});
-    try w.print("  safety margin:       {d} bytes\n", .{safety_margin});
+    try w.print("  header size:         {d} bytes\n", .{header.header_size});
+    try w.print("  code+data size:      {d} bytes\n", .{header.code_data_size});
+    try w.print("  bss size:            {d} bytes\n", .{header.bss_size});
+    try w.print("  reloc stream size:   {d} bytes\n", .{header.reloc_stream_size});
+    try w.print("  compressed size:     {d} bytes\n", .{header.compressed_size});
+    try w.print("  safety margin:       {d} bytes\n", .{header.safety_margin});
     try w.print("  resident at runtime: {d} bytes (code+data+bss)\n", .{resident_size});
     if (uncompressed_size > 0) {
-        const ratio = @as(f64, @floatFromInt(compressed_size)) / @as(f64, @floatFromInt(uncompressed_size)) * 100.0;
-        try w.print("  payload ratio:       {d:.1}% ({d} -> {d} bytes)\n", .{ ratio, uncompressed_size, compressed_size });
+        const ratio = @as(f64, @floatFromInt(header.compressed_size)) / @as(f64, @floatFromInt(uncompressed_size)) * 100.0;
+        try w.print("  payload ratio:       {d:.1}% ({d} -> {d} bytes)\n", .{ ratio, uncompressed_size, header.compressed_size });
     }
     try w.print("  packed file size:    {d} bytes\n", .{exe_bytes.len});
 }

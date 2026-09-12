@@ -21,6 +21,16 @@ call `OpenLibrary`), not fine for a real one that does.
 (`tests/corpus/*.exe` + a paired `*.meta`) via a genuine AmigaDOS
 launch instead - see that script's own header if you're adding one.
 
+`zig build bench -- <packed-exe>` predicts a depacker's exact 68000
+decompression cost in CPU cycles via a standalone Musashi-based
+emulation harness (`tools/bench/README.md`), needing no Kickstart ROM
+and no real-time-paced boot - useful for comparing backends' speed
+without FS-UAE's host-load sensitivity, but it doesn't replace the
+above for correctness: it never touches relocation, `AllocMem`, or a
+real AmigaDOS environment at all, and its cycle counts are a best-case
+lower bound (no chip RAM bus-contention modeling), not a validated
+wall-clock number.
+
 **If your change touches `stubs/`, `src/container.zig`,
 `src/flatten.zig`, or anything else in the actual pack/depack pipeline,
 `zig build test` passing is necessary but not sufficient - run at least

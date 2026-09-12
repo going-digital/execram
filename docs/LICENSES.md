@@ -308,9 +308,54 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | Salvador — `src/libdivsufsort/` (different fork than Zultra's) | MIT | Yes | Retain notice |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
+| Musashi | MIT | Yes (dev-tool only, see §11) | Retain notice |
 
 **Net effect: no clean-room reimplementation is legally required for any
 of the four backends.** We can adapt existing source for all of them,
 provided we keep the relevant notices in `docs/algorithm-notes/` and in
 the stub source files themselves, and ship a `THIRD_PARTY_LICENSES.md` (or
 equivalent) alongside execram's own license once the codebase exists.
+
+## 11. Musashi — `kstenerud/Musashi`
+
+Commit audited: `313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd`
+
+A portable, C-only 68000-68040 CPU-core emulator (no chip/disk/video
+emulation), used here purely to power `tools/bench` (see that
+directory's README): a dev tool that runs a compiled depacker stub
+through the real 68000 instruction set outside FS-UAE, to get an exact
+cycle count for its decompression time instead of a real-time-paced,
+host-load-sensitive wall-clock measurement. Per upstream's `readme.txt`
+("LICENSE AND COPYRIGHT"):
+
+```
+Copyright © 1998-2001 Karl Stenerud
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+MIT, permissive, no copyleft - fine to vendor directly, honoring the
+notice. Vendored at `src/musashi_vendor/` (subset only - see that
+directory's README for exactly what and why). **Not added to
+`THIRD_PARTY_LICENSES.md`**: unlike every other entry in this audit,
+Musashi is never linked into the `execram` binary itself or shipped in
+any release archive - it only powers a separate, host-only dev/
+benchmarking tool (`tools/bench`) - so it doesn't meet that file's own
+scope ("travels with any redistribution" of execram). Same reasoning
+already applied to vasm/vlink in §5.
