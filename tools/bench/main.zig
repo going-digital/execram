@@ -225,7 +225,17 @@ pub fn main(init: std.process.Init) !void {
     _ = c.m68k_execute(0);
     var total_cycles: u64 = 0;
     var steps: u64 = 0;
-    const step_limit: u64 = 500_000_000; // generous safety valve against a genuine infinite loop
+    // Safety valve against a genuine infinite loop (inflate/zultra's
+    // stub hits exactly this - see tools/bench/README.md's "Known
+    // limitations"). Each single-step m68k_execute(1) call costs real
+    // wall-clock time, so this bound isn't just "some big number": at
+    // ~500M it took over 100s of real time to actually trip on that
+    // known-hanging case, a bad failure mode for a tool meant to be
+    // fast. The real hexagon.exe corpus item's largest observed step
+    // count (a full 216KB shrinkler decompression) was ~35.3M, so 100M
+    // keeps a healthy ~2.8x margin above any real workload seen so far
+    // while cutting a genuine hang's wall-clock cost roughly 5x.
+    const step_limit: u64 = 100_000_000;
     while (c.m68k_get_reg(null, c.M68K_REG_PC) != trampoline) {
         total_cycles += @intCast(c.m68k_execute(1));
         steps += 1;
