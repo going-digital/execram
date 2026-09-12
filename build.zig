@@ -10,11 +10,18 @@ const Stub = struct {
     /// Passed to vasm as `-I<dir>` when the stub `include`s shared code
     /// (stubs/common/) - see stubs/store/stub.s.
     include_dir: ?[]const u8 = null,
+    /// vasm's syntax module is chosen per invocation and can't be mixed
+    /// within one assembly. Everything is Motorola/Devpac syntax
+    /// (vasmm68k_mot) except the inflate stub, which needs vasm's
+    /// GNU-as-style module to assemble the vendored inflate.S it
+    /// includes - see stubs/inflate/README.md.
+    syntax: enum { mot, std } = .mot,
 };
 
 const stubs = [_]Stub{
     .{ .name = "stub_example", .source = "stubs/example/hello.s" },
     .{ .name = "stub_store", .source = "stubs/store/stub.s", .include_dir = "stubs/common" },
+    .{ .name = "stub_inflate", .source = "stubs/inflate/stub.s", .include_dir = "stubs/inflate", .syntax = .std },
 };
 
 /// A real hunk executable built at test time (vasm assembles to a linkable
@@ -40,6 +47,11 @@ pub fn build(b: *std.Build) void {
         "vasm",
         "Path to the vasmm68k_mot binary used to assemble 68k stubs",
     ) orelse "vasmm68k_mot";
+    const vasm_std = b.option(
+        []const u8,
+        "vasm-std",
+        "Path to the vasmm68k_std binary, needed only for the inflate stub (see stubs/inflate/README.md)",
+    ) orelse "vasmm68k_std";
     const vlink = b.option(
         []const u8,
         "vlink",
@@ -68,7 +80,10 @@ pub fn build(b: *std.Build) void {
 
     for (stubs) |stub| {
         const assemble = b.addSystemCommand(&.{
-            vasm,
+            switch (stub.syntax) {
+                .mot => vasm,
+                .std => vasm_std,
+            },
             "-Fbin", // raw binary output, no hunk/object wrapper
             "-no-opt", // no branch/addressing-mode relaxation: keep stub timing predictable
             "-quiet",

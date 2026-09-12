@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
-# M1 FS-UAE end-to-end test: builds execram, packs a real test program
-# with it (--backend=store), and boots the packed program's inner
+# M1/M2 FS-UAE end-to-end test: builds execram, packs a real test
+# program with it, and boots the packed program's inner
 # stub+header+payload container directly - skipping the outer AmigaDOS
-# hunk-file wrapper (see e2e/extract_container.py) - via the same
-# bare-metal boot-block technique as run_boot_test.sh. The test program
-# (e2e/program.s) only prints its sentinel correctly if a pointer that
-# went through a real cross-hunk AND a real self-hunk relocation both
-# ended up correct - this checks the packed program's runtime stub
-# actually decompressed, allocated, and *relocated* things correctly,
-# not just "didn't crash".
+# hunk-file wrapper (see e2e/extract_container.py) - via a disk-reading
+# boot loader (e2e/loader.s; run_boot_test.sh's simpler bare-metal
+# sentinel embeds everything directly in the 1024-byte boot block
+# instead, which no longer fits once a real depacker stub is involved).
+# The test program (e2e/program.s) only prints its sentinel correctly if
+# a pointer that went through a real cross-hunk AND a real self-hunk
+# relocation both ended up correct - this checks the packed program's
+# runtime stub actually decompressed, allocated, and *relocated* things
+# correctly, not just "didn't crash".
 #
 # Requires the same things as run_boot_test.sh, plus vlink (to link the
 # test program into a real hunk executable execram can pack) - this
 # script builds execram itself, so Zig and vasm/vlink are all it needs.
+#
+# EXECRAM_TEST_BACKEND selects which backend to pack with (default
+# store); the inflate backend also needs EXECRAM_VASM_STD (a
+# vasmm68k_std build - see stubs/inflate/README.md) if it isn't on PATH
+# under that name already.
 
 set -euo pipefail
 
@@ -22,7 +29,9 @@ FSUAE_BIN="${EXECRAM_FSUAE:-/Applications/FS-UAE.app/Contents/MacOS/fs-uae}"
 SENTINEL="EXECRAM-PACKED-OK"
 BOOT_TIMEOUT_CHECKS=24 # 24 * 0.5s = 12s
 VASM="${EXECRAM_VASM:-vasmm68k_mot}"
+VASM_STD="${EXECRAM_VASM_STD:-vasmm68k_std}"
 VLINK="${EXECRAM_VLINK:-vlink}"
+BACKEND="${EXECRAM_TEST_BACKEND:-store}"
 
 if [ -z "${EXECRAM_KICKSTART:-}" ]; then
   echo "error: set EXECRAM_KICKSTART to a Kickstart ROM path (see run_boot_test.sh's header)" >&2
@@ -50,7 +59,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== building execram =="
-(cd "$REPO_ROOT" && zig build -Dvasm="$VASM")
+(cd "$REPO_ROOT" && zig build -Dvasm="$VASM" -Dvasm-std="$VASM_STD")
 EXECRAM="$REPO_ROOT/zig-out/bin/execram"
 
 echo "== assembling and linking the test program =="
@@ -59,28 +68,26 @@ PROGRAM_EXE="$WORK_DIR/program.exe"
 "$VASM" -Fhunk -no-opt -quiet -o "$PROGRAM_OBJ" "$SCRIPT_DIR/e2e/program.s"
 "$VLINK" -bamigahunk -o "$PROGRAM_EXE" "$PROGRAM_OBJ"
 
-echo "== packing with execram (--backend=store) =="
+echo "== packing with execram (--backend=$BACKEND) =="
 PACKED_EXE="$WORK_DIR/packed.exe"
-"$EXECRAM" pack "$PROGRAM_EXE" "$PACKED_EXE"
+"$EXECRAM" pack "--backend=$BACKEND" "$PROGRAM_EXE" "$PACKED_EXE"
 
 echo "== extracting the inner container =="
 CONTAINER_BIN="$WORK_DIR/container.bin"
 python3 "$SCRIPT_DIR/e2e/extract_container.py" "$PACKED_EXE" "$CONTAINER_BIN"
+CONTAINER_LEN="$(wc -c <"$CONTAINER_BIN" | tr -d ' ')"
+
+echo "== assembling the disk loader (container is $CONTAINER_LEN bytes) =="
+# Depacker stubs don't fit in a 1024-byte boot block (the inflate one
+# alone is already over 1KB), unlike run_boot_test.sh's bare sentinel -
+# so this loads the container from disk instead of embedding it in the
+# boot block directly. See e2e/loader.s.
+LOADER_BIN="$WORK_DIR/loader.bin"
+"$VASM" -Fbin -no-opt -quiet "-DPAYLOAD_LEN=$CONTAINER_LEN" -o "$LOADER_BIN" "$SCRIPT_DIR/e2e/loader.s"
 
 echo "== building test ADF =="
-BOOT_BIN="$WORK_DIR/boot.bin"
-python3 - "$CONTAINER_BIN" "$BOOT_BIN" <<'PYEOF'
-import sys
-container = open(sys.argv[1], "rb").read()
-# Same 12-byte boot-block header as boot/sentinel.s: 'DOS' id, a
-# checksum placeholder build_adf.py fills in, and an unused root block
-# pointer - the boot protocol calls straight into the bytes after this,
-# which here is our packed container's stub code.
-boot_header = b"DOS" + b"\x00" + b"\x00\x00\x00\x00" + b"\x00\x00\x00\x00"
-open(sys.argv[2], "wb").write(boot_header + container)
-PYEOF
 ADF="$WORK_DIR/e2e.adf"
-python3 "$SCRIPT_DIR/boot/build_adf.py" "$BOOT_BIN" "$ADF"
+python3 "$SCRIPT_DIR/e2e/build_disk.py" "$LOADER_BIN" "$CONTAINER_BIN" "$ADF"
 
 echo "== opening a pty bridge for the emulated serial port =="
 SERIAL_LOG="$WORK_DIR/serial.log"

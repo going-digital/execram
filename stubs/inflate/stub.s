@@ -1,0 +1,53 @@
+; "inflate" backend depacker stub: real DEFLATE decompression via a
+; vendored/adapted Keir Fraser inflate.S (see inflate_core.s and
+; README.md for why this whole stub is std-syntax, unlike every other
+; stub in this project).
+
+	.include	"runtime_std.i"
+	.include	"inflate_core.s"
+
+; inflate.S's OPT_STORAGE_OFFSTACK convention: A6 must point at the
+; *end* of this many bytes of scratch memory. 2928 is upstream's own
+; documented figure for OPT_TABLE_LOOKUP=1 (kept at its default, on).
+.equ INFLATE_STORAGE_SIZE,2928
+
+; In:  A0 = compressed (DEFLATE) input, A1 = output.
+;      D0 = compressed_size - unused: DEFLATE streams are
+;      self-terminating, inflate.S decodes until the final block's
+;      end-of-block marker regardless.
+; Preserves D2-D7/A2-A6 per runtime_std.i's contract by saving them
+; up front and restoring before returning - freely reused as scratch
+; (including for ExecBase and inflate.S's own A4/A5/A6 arguments) in
+; between.
+Depack:
+	movem.l	a2-a6,-(sp)
+
+	move.l	a1,a4			; a4 = output (inflate.S's convention)
+	move.l	a0,a5			; a5 = input
+
+	move.l	4.w,a6			; ExecBase
+	move.l	#INFLATE_STORAGE_SIZE,d0
+	moveq	#0,d1			; MEMF_ANY
+	jsr	EXEC_AllocMem(a6)
+	move.l	d0,a2			; a2 = scratch block base (reused; our
+					; caller's a2 is safe on the stack)
+	tst.l	d0
+	beq.w	Fail			; defined in runtime_std.i
+
+	add.l	#INFLATE_STORAGE_SIZE,d0
+	move.l	d0,a6			; a6 = *end* of scratch (OPT_STORAGE_OFFSTACK)
+
+	bsr.w	inflate
+
+	move.l	4.w,a6			; ExecBase again - inflate.S preserves
+					; every register, so a6 still holds
+					; the scratch-end pointer, not this
+	move.l	#INFLATE_STORAGE_SIZE,d0
+	move.l	a2,a1
+	jsr	EXEC_FreeMem(a6)
+
+	movem.l	(sp)+,a2-a6
+	rts
+
+	.even
+StubEnd:

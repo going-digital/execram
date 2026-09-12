@@ -11,12 +11,15 @@ covering the reference implementations this project builds on.
 
 ## Building
 
-Requires [Zig 0.16](https://ziglang.org/) and
-[vasm](http://sun.hasenbraten.de/vasm/) (the `m68k`/`mot` build, i.e. the
-`vasmm68k_mot` binary) on `PATH`. `zig build test` additionally needs
-[vlink](http://sun.hasenbraten.de/vlink/) on `PATH` to link the real
-test-fixture executables `src/hunk.zig`'s tests run against — plain
-`zig build`/`zig build run` don't need it.
+Requires [Zig 0.16](https://ziglang.org/) and two builds of
+[vasm](http://sun.hasenbraten.de/vasm/) on `PATH`: `vasmm68k_mot` (used
+by every stub except inflate's) and `vasmm68k_std` (needed only by the
+inflate stub, which includes a vendored upstream file written for a
+GNU-as-style dialect — see
+[stubs/inflate/README.md](stubs/inflate/README.md)). `zig build test`
+additionally needs [vlink](http://sun.hasenbraten.de/vlink/) on `PATH`
+to link the real test-fixture executables `src/hunk.zig`'s tests run
+against.
 
 ```sh
 zig build              # build ./zig-out/bin/execram
@@ -24,13 +27,16 @@ zig build test         # run unit tests (needs vlink too, see above)
 zig build run -- pack  # build and run
 ```
 
-If `vasmm68k_mot`/`vlink` aren't on `PATH`, point at them explicitly:
+If any of these aren't on `PATH`, point at them explicitly:
 
 ```sh
-zig build -Dvasm=/path/to/vasmm68k_mot -Dvlink=/path/to/vlink
+zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=/path/to/vlink
 ```
 
 ## Status
 
-Early scaffolding (M0) — see the milestones in
-[PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). Not yet functional.
+M1 and M2 done (store and inflate backends both pack and boot real
+executables correctly, verified under FS-UAE) — see the milestones in
+[PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). `execram pack
+[--backend=store|inflate] <in> <out>` works today; zx0/shrinkler land in
+later milestones.

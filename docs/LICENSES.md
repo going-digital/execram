@@ -119,14 +119,19 @@ freely, subject to the following restrictions:
 Fully permissive for our use (adapt as the ZX0 depacker stub); just keep
 the notice in the stub source and don't claim we wrote the original.
 
-## 4. Keir Fraser's `inflate.S` — `keirf/Amiga-Stuff`
+## 4. Keir Fraser's `inflate.S` and `bootblock.S` — `keirf/Amiga-Stuff`
 
 Commit audited: `fdf7f28e6eb8e6084581df083d37d363052527fd`
 
 Unlicense (public domain), per the repo's `COPYING` file and the README's
 "All code is public domain." No conditions at all — safe to adapt
-directly with no notice obligations (though we'll still credit it in
-`docs/algorithm-notes/` as a matter of good practice, not legal necessity).
+directly with no notice obligations (though we credit both in
+`stubs/inflate/inflate_core.s` and `tests/uae/e2e/loader.s` respectively,
+as a matter of good practice, not legal necessity). `inflate.S` is
+vendored/adapted into the shipped inflate backend's depacker stub
+(M2); `bootblock.S`'s disk-reading mechanics (IORequest field offsets,
+`DoIO` usage) informed `tests/uae/e2e/loader.s`, a test-only tool, not
+anything shipped.
 
 ## 5. vasm and vlink (build/test-time toolchain dependencies)
 
@@ -219,7 +224,7 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | ZX0 — host compressor | BSD-3-Clause | Yes | Retain copyright notice + disclaimer |
 | ZX0 — 68k depacker (in ZX0 repo) | zlib | Yes | Retain notice |
 | unzx0_68000 | zlib | Yes | Retain notice; don't misrepresent origin |
-| Keir Fraser `inflate.S` | Unlicense (public domain) | Yes | None |
+| Keir Fraser `inflate.S` / `bootblock.S` | Unlicense (public domain) | Yes | None |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 

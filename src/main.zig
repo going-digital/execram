@@ -5,24 +5,25 @@ const hunk = @import("hunk.zig");
 const flatten = @import("flatten.zig");
 const container = @import("container.zig");
 const store = @import("backends/store.zig");
+const inflate = @import("backends/inflate.zig");
 
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
 /// Real backends replace this in later milestones (see PROJECT_PLAN.md).
 const stub_example = @embedFile("stub_example");
 
-/// The "store" backend's depacker stub (stubs/store/stub.s), assembled
-/// and embedded at build time (build.zig).
+/// Depacker stubs (stubs/<name>/stub.s), assembled and embedded at
+/// build time (build.zig).
 const stub_store = @embedFile("stub_store");
+const stub_inflate = @embedFile("stub_inflate");
 
 const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack [--backend=store] <in> <out>
+    \\  execram pack [--backend=store|inflate] <in> <out>
     \\  execram info <packed-exe>
     \\
-    \\Only --backend=store exists so far (M1); inflate/zx0/shrinkler
-    \\land in later milestones - see PROJECT_PLAN.md.
+    \\zx0/shrinkler land in later milestones - see PROJECT_PLAN.md.
     \\
 ;
 
@@ -60,12 +61,8 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate] <in> <out>", .{});
         return error.InvalidArguments;
-    }
-    if (!std.mem.eql(u8, backend_name, "store")) {
-        std.log.err("backend '{s}' isn't implemented yet - only 'store' exists in M1", .{backend_name});
-        return error.UnsupportedBackend;
     }
 
     const in_path = positional.items[0];
@@ -80,8 +77,16 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     var image = try flatten.flatten(arena, file);
     defer image.deinit();
 
-    const payload = try store.compress(arena, image);
-    const container_bytes = try container.buildContainer(arena, image, .store, stub_store, payload);
+    const payload, const backend_id, const stub_bytes = if (std.mem.eql(u8, backend_name, "store"))
+        .{ try store.compress(arena, image), container.BackendId.store, stub_store }
+    else if (std.mem.eql(u8, backend_name, "inflate"))
+        .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate }
+    else {
+        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate' exist so far", .{backend_name});
+        return error.UnsupportedBackend;
+    };
+
+    const container_bytes = try container.buildContainer(arena, image, backend_id, stub_bytes, payload);
     const exe_bytes = try container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
 
     try cwd.writeFile(io, .{ .sub_path = out_path, .data = exe_bytes });
@@ -107,4 +112,5 @@ test {
     _ = flatten;
     _ = container;
     _ = store;
+    _ = inflate;
 }

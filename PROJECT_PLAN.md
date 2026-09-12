@@ -225,13 +225,48 @@ PROJECT_PLAN.md                 this file
      address - see `tests/uae/README.md`) that the byte-level check
      alone couldn't have, since it never executed the stub's own code.
 
-**M2 — Inflate backend** (~2–3 weeks)
-- Host-side raw-DEFLATE encoder (vendor or Zig-native)
-- Depacker stub adapted/ported from `inflate.S` (license permitting) or
-  clean-room otherwise
-- Safety-margin verification for in-place decompression
-- **Deliverable:** `execram pack --backend=inflate` — smaller, correctly
-  booting executables; first ratio/speed benchmark numbers recorded
+**M2 — Inflate backend** ✅ done
+- ~~Host-side raw-DEFLATE encoder~~ — used Zig's own standard library
+  (`std.compress.flate.Compress`, `.raw` container), no vendoring
+  needed. `src/backends/inflate.zig`; tested by round-tripping through
+  Zig's own `Decompress` as an independent check that the output is
+  valid DEFLATE, not just "assembled without erroring."
+- ~~Depacker stub adapted from `inflate.S`~~ — done, with real
+  engineering surprises along the way (see
+  `stubs/inflate/README.md`): the upstream file is written for a real
+  C-preprocessor pass and a GNU-as dialect vasm's `mot` module can't
+  parse at all, and vasm's `std` module (used instead) turned out to
+  only support single-digit numeric local labels and not resolve them
+  correctly inside macros regardless — worked around by disabling one
+  upstream optimization option (`OPT_INLINE_FUNCTIONS`, ~15% speed
+  cost, upstream's own documented figure) so the two affected macros
+  are used exactly once each, then hand-inlining them with named labels
+  instead of vasm's macro mechanism. Needed a std-syntax port of the
+  shared `runtime.i`/`header.i` skeleton too, since vasm's syntax
+  module can't be mixed within one assembly — accepted as contained,
+  documented duplication rather than a fragile cross-file-linking
+  scheme.
+- Safety-margin verification for in-place decompression — still
+  deferred, per `docs/format-spec.md` §8's v0 scope (separate
+  scratch+final buffers, no margin needed yet); unchanged by this
+  milestone.
+- ~~**Deliverable**~~ ✅ `execram pack --backend=inflate` works and
+  produces correctly-booting executables, verified the same two ways as
+  M1's store backend: byte-level (Zig's own `Decompress` round-trip) and
+  **real hardware/emulation** (`tests/uae/run_e2e_test.sh
+  EXECRAM_TEST_BACKEND=inflate` boots the packed test program under
+  FS-UAE against Kickstart 1.3 and confirms it prints its sentinel via a
+  correctly-relocated pointer). That real-hardware test needed its own
+  new tooling (`tests/uae/e2e/loader.s`, a disk-reading boot loader,
+  since the inflate stub alone is already bigger than the 1024-byte
+  boot block the M1 test's simpler embed-everything approach used) and
+  caught a real bug in it (`trackdisk.device`'s `CMD_READ` needs a
+  sector-aligned length) - see `tests/uae/README.md`.
+- **Not yet done, flagged honestly:** ratio/speed benchmark numbers on
+  a real, substantial program - only tiny hand-written test programs
+  exist so far, where stub overhead (the inflate stub is ~1.1KB) swamps
+  any compression benefit. First real ratio data is still outstanding;
+  a good candidate task before or alongside M3.
 
 **M3 — ZX0 backend** (~2–3 weeks)
 - Vendor/port ZX0's optimal-parse compressor
