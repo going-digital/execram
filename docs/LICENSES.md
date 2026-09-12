@@ -308,7 +308,7 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | Salvador — `src/libdivsufsort/` (different fork than Zultra's) | MIT | Yes | Retain notice |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
-| Musashi | MIT | Yes (dev-tool only, see §11) | Retain notice |
+| Musashi | MIT | Yes (see §11) | Retain notice |
 
 **Net effect: no clean-room reimplementation is legally required for any
 of the four backends.** We can adapt existing source for all of them,
@@ -321,12 +321,17 @@ equivalent) alongside execram's own license once the codebase exists.
 Commit audited: `313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd`
 
 A portable, C-only 68000-68040 CPU-core emulator (no chip/disk/video
-emulation), used here purely to power `tools/bench` (see that
-directory's README): a dev tool that runs a compiled depacker stub
-through the real 68000 instruction set outside FS-UAE, to get an exact
-cycle count for its decompression time instead of a real-time-paced,
-host-load-sensitive wall-clock measurement. Per upstream's `readme.txt`
-("LICENSE AND COPYRIGHT"):
+emulation), used here to run a compiled depacker stub through the real
+68000 instruction set and get an exact cycle count for its
+decompression time, instead of a real-time-paced, host-load-sensitive
+FS-UAE wall-clock measurement. Originally added purely to power
+`tools/bench` (a dev-only tool - see that directory's README), a
+dev-tool-only dependency deliberately kept out of the shipped
+`execram` binary. That changed when `execram bench` (src/main.zig)
+landed: it links the same Musashi core (via src/musashi_bench.zig)
+directly into the real, released binary, so Musashi is now a genuine
+runtime dependency of execram itself, not just a dev tool's. Per
+upstream's `readme.txt` ("LICENSE AND COPYRIGHT"):
 
 ```
 Copyright © 1998-2001 Karl Stenerud
@@ -352,10 +357,9 @@ THE SOFTWARE.
 
 MIT, permissive, no copyleft - fine to vendor directly, honoring the
 notice. Vendored at `src/musashi_vendor/` (subset only - see that
-directory's README for exactly what and why). **Not added to
-`THIRD_PARTY_LICENSES.md`**: unlike every other entry in this audit,
-Musashi is never linked into the `execram` binary itself or shipped in
-any release archive - it only powers a separate, host-only dev/
-benchmarking tool (`tools/bench`) - so it doesn't meet that file's own
-scope ("travels with any redistribution" of execram). Same reasoning
-already applied to vasm/vlink in §5.
+directory's README for exactly what and why). **Added to
+`THIRD_PARTY_LICENSES.md`**, unlike vasm/vlink (§5): those never ship
+in any form, while Musashi now does, compiled directly into the
+`execram` binary that `execram bench` is part of - it meets
+`THIRD_PARTY_LICENSES.md`'s own scope ("travels with any
+redistribution" of execram) that it didn't when this was written.

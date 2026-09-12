@@ -92,10 +92,12 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{ .root_module = test_module });
 
     // tools/bench (src/musashi_vendor/README.md, tools/bench/README.md):
-    // a dev-only cycle-timing tool built around the vendored Musashi 68k
-    // CPU core, entirely separate from the shipped `execram` binary -
-    // always native/host target and its own module, so nothing here
-    // ever affects `zig build`'s cross-compiled output.
+    // a dev-only cycle-timing tool sharing its Musashi-driving core
+    // (src/musashi_bench.zig) with the shipped `execram bench` command
+    // (src/main.zig) - see that file's own module doc for why the split
+    // exists. Always native/host target and its own module, so nothing
+    // here ever affects `zig build`'s cross-compiled output for
+    // `execram` itself.
     const bench_module = b.createModule(.{
         .root_source_file = b.path("tools/bench/main.zig"),
         .target = b.graph.host,
@@ -259,17 +261,25 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    // link_libc was already set above (bench_module joined the
-    // exe_module/test_module vendor-linking loop) - the rest of
-    // bench_module's own wiring (Musashi's core, not any backend's
-    // vendored compressor) continues here.
-    bench_module.addIncludePath(b.path("src/musashi_vendor"));
+    // Musashi (src/musashi_vendor/) - src/musashi_bench.zig's own C
+    // dependency. Needed by exe_module/test_module now too, not just
+    // lib_module (tools/bench's dependency surface): `execram bench`
+    // (src/main.zig) links it directly into the shipped binary, which
+    // is *not* how this started out - see docs/LICENSES.md §11 and
+    // THIRD_PARTY_LICENSES.md, both updated when that command was
+    // added, for why Musashi is no longer a dev-tool-only dependency.
+    for ([_]*std.Build.Module{ exe_module, test_module, lib_module }) |mod| {
+        mod.addIncludePath(b.path("src/musashi_vendor"));
+    }
 
     // Musashi ships its opcode dispatch tables as generated source, not
     // static files: `m68kmake` reads m68k_in.c's opcode primitives and
     // emits m68kops.c/m68kops.h. Compiled and run here as a native host
     // tool, same "compile a small generator, run it, feed the output
-    // back into the real build" shape used for stub assembly above.
+    // back into the real build" shape used for stub assembly above -
+    // one shared codegen run (m68kmake itself always runs on the host
+    // regardless of what exe_module/test_module are cross-compiling
+    // for), its generated output added to every module that needs it.
     const m68kmake_module = b.createModule(.{
         .target = b.graph.host,
         .optimize = .ReleaseFast,
@@ -286,24 +296,27 @@ pub fn build(b: *std.Build) void {
     const musashi_gen = run_m68kmake.addOutputDirectoryArg("musashi_gen");
     run_m68kmake.addFileArg(b.path("src/musashi_vendor/m68k_in.c"));
 
-    bench_module.addIncludePath(musashi_gen);
-    bench_module.addCSourceFile(.{ .file = b.path("src/musashi_vendor/m68kcpu.c"), .flags = &.{} });
-    bench_module.addCSourceFile(.{ .file = musashi_gen.path(b, "m68kops.c"), .flags = &.{} });
-    // m68kcpu.c unconditionally #includes m68kfpu.c itself (not a
-    // separate translation unit here - see src/musashi_vendor/README.md
-    // on why compiling it again separately would double-define every
-    // FPU opcode handler), so only softfloat.c needs adding on top:
-    // m68kfpu.c needs softfloat's implementation to link even though
-    // tools/bench only ever selects M68K_CPU_TYPE_68000 and never
-    // exercises an FPU opcode.
-    bench_module.addCSourceFile(.{ .file = b.path("src/musashi_vendor/softfloat/softfloat.c"), .flags = &.{} });
+    for ([_]*std.Build.Module{ exe_module, test_module, lib_module }) |mod| {
+        mod.addIncludePath(musashi_gen);
+        mod.addCSourceFile(.{ .file = b.path("src/musashi_vendor/m68kcpu.c"), .flags = &.{} });
+        mod.addCSourceFile(.{ .file = musashi_gen.path(b, "m68kops.c"), .flags = &.{} });
+        // m68kcpu.c unconditionally #includes m68kfpu.c itself (not a
+        // separate translation unit here - see src/musashi_vendor/README.md
+        // on why compiling it again separately would double-define every
+        // FPU opcode handler), so only softfloat.c needs adding on top:
+        // m68kfpu.c needs softfloat's implementation to link even though
+        // src/musashi_bench.zig only ever selects M68K_CPU_TYPE_68000
+        // and never exercises an FPU opcode.
+        mod.addCSourceFile(.{ .file = b.path("src/musashi_vendor/softfloat/softfloat.c"), .flags = &.{} });
+    }
 
-    // A minimal fake Exec (AllocMem/FreeMem only) so tools/bench can
-    // also run the inflate/zultra stub - its Depack: is the only one
+    // A minimal fake Exec (AllocMem/FreeMem only) so the inflate/zultra
+    // stub can also run under Musashi - its Depack: is the only one
     // that calls into real Exec library functions for its own scratch
     // memory (see tools/bench/fake_exec.s's own module doc for the
     // full design and why it's safe to be this minimal). Assembled the
-    // same way as every real stub above.
+    // same way as every real stub above, needed by every module that
+    // compiles src/musashi_bench.zig.
     const fake_exec_assemble = b.addSystemCommand(&.{
         vasm,
         "-Fbin",
@@ -313,7 +326,9 @@ pub fn build(b: *std.Build) void {
     fake_exec_assemble.addFileArg(b.path("tools/bench/fake_exec.s"));
     fake_exec_assemble.addArg("-o");
     const fake_exec_bin = fake_exec_assemble.addOutputFileArg("fake_exec.bin");
-    bench_module.addAnonymousImport("fake_exec", .{ .root_source_file = fake_exec_bin });
+    for ([_]*std.Build.Module{ exe_module, test_module, lib_module }) |mod| {
+        mod.addAnonymousImport("fake_exec", .{ .root_source_file = fake_exec_bin });
+    }
 
     const bench_exe = b.addExecutable(.{ .name = "execram-bench", .root_module = bench_module });
     const run_bench = b.addRunArtifact(bench_exe);
@@ -378,6 +393,12 @@ pub fn build(b: *std.Build) void {
         assemble_listing.addArg("-o");
         _ = assemble_listing.addOutputFileArg(b.fmt("{s}_relisted.bin", .{stub.name}));
 
+        // exe_module/test_module need this too now: `execram bench`
+        // (src/main.zig) locates each stub's `Depack:` offset exactly
+        // like tools/bench does, via src/musashi_bench.zig's shared
+        // `parseDepackOffset`.
+        exe_module.addAnonymousImport(b.fmt("{s}_listing", .{stub.name}), .{ .root_source_file = listing });
+        test_module.addAnonymousImport(b.fmt("{s}_listing", .{stub.name}), .{ .root_source_file = listing });
         bench_module.addAnonymousImport(b.fmt("{s}_listing", .{stub.name}), .{ .root_source_file = listing });
         bench_module.addAnonymousImport(stub.name, .{ .root_source_file = bin });
     }

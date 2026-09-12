@@ -1,11 +1,21 @@
 # tools/bench: 68000 depack-cycle predictor
 
-A dev-only tool, separate from the shipped `execram` binary, that
-predicts how many real 68000 CPU cycles a packed executable's depacker
-stub takes to run - built around
+A dev-only tool (a separate binary from `execram` itself) that
+predicts how many real 68000 CPU cycles an *already-packed* executable's
+depacker stub takes to run - built around
 [Musashi](https://github.com/kstenerud/Musashi) (`src/musashi_vendor/`),
 a portable, C-only 68000-68040 CPU-core emulator with no chip/disk/video
-timing of its own.
+timing of its own, via the shared core in `src/musashi_bench.zig`.
+
+That same shared core also powers `execram bench` (`src/main.zig`),
+which *does* ship as part of the real `execram` binary: given a raw,
+unpacked input, it packs a fresh copy with every backend and prints a
+comparison table (size, ratio, decompression cost) for all of them at
+once, instead of this tool's one-file-at-a-time, already-packed-input
+shape. Use `execram bench` for "which backend should I use on this
+program"; use this tool for "how fast does this specific file I already
+packed decompress" (or for testing a file this build of `execram` didn't
+itself produce).
 
 ## Why this exists alongside `tests/uae/`, not instead of it
 

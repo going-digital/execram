@@ -123,7 +123,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Applies to: `src/backends/zultra_vendor/libdivsufsort/` and
 `src/backends/salvador_vendor/libdivsufsort/` (two different forks of
 the same upstream project, both by Yuta Mori - see
-`src/backends/salvador_vendor/README.md` for how they differ).
+`src/backends/salvador_vendor/README.md` for how they differ), and
+`src/musashi_vendor/` (Karl Stenerud - see `docs/LICENSES.md` §11 and
+`src/musashi_vendor/README.md`; compiled directly into this binary via
+the `bench` command, not just a build/test-time tool the way vasm and
+vlink are).
 
 ```
 Permission is hereby granted, free of charge, to any person obtaining a

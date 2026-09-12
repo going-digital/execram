@@ -16,6 +16,7 @@ const zx0 = @import("backends/zx0.zig");
 const zultra = @import("backends/zultra.zig");
 const salvador = @import("backends/salvador.zig");
 const shrinkler = @import("backends/shrinkler.zig");
+const musashi_bench = @import("musashi_bench.zig");
 
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
 /// Real backends replace this in later milestones (see PROJECT_PLAN.md).
@@ -28,7 +29,27 @@ const stub_inflate = @embedFile("stub_inflate");
 const stub_zx0 = @embedFile("stub_zx0");
 const stub_shrinkler = @embedFile("stub_shrinkler");
 
+/// vasm `-L` listings of the same four stubs, needed only by `execram
+/// bench` (via src/musashi_bench.zig's `parseDepackOffset`) to locate
+/// each one's `Depack:` entry point - see that function's own doc
+/// comment on why a listing, not the `-Fbin` binary alone, is needed.
+const listing_store = @embedFile("stub_store_listing");
+const listing_inflate = @embedFile("stub_inflate_listing");
+const listing_zx0 = @embedFile("stub_zx0_listing");
+const listing_shrinkler = @embedFile("stub_shrinkler_listing");
+
 const backend_names = [_][]const u8{ "store", "inflate", "zultra", "zx0", "salvador", "shrinkler" };
+
+/// `execram bench`'s default backend set - `store` (no compression at
+/// all, rarely what anyone wants to compare against) and `zx0` (the
+/// same container/depacker as `salvador`, which produces the same
+/// decompression cost with a vastly faster host-side compressor - see
+/// src/backends/salvador.zig - so `zx0` itself adds a lot of wait
+/// with no comparison value most of the time: ~508s measured on
+/// tests/corpus/hexagon.exe, 221KB, versus salvador's ~13s for the
+/// same stub) are excluded by default. `execram bench --all` runs
+/// every backend in `backend_names` instead.
+const bench_default_backend_names = [_][]const u8{ "inflate", "zultra", "salvador", "shrinkler" };
 
 const usage =
     \\execram - Amiga executable compressor
@@ -37,6 +58,7 @@ const usage =
     \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto]
     \\               [--mem=chip|fast] [-v] <in> <out>
     \\  execram info <packed-exe>
+    \\  execram bench [--all] <in>
     \\  execram --version
     \\
     \\--backend=auto (the default) tries every backend and keeps
@@ -64,6 +86,22 @@ const usage =
     \\than ever writing an executable that wouldn't decompress correctly
     \\on real hardware.
     \\
+    \\bench packs <in> with every backend and prints a comparison table:
+    \\output size, compression ratio, and decompression cost on a real
+    \\68000 - exact CPU cycles and PAL (7.09MHz) time, measured by
+    \\running each depacker stub's actual code through Musashi (a 68000
+    \\CPU-core emulator), assuming zero interrupt/OS/DMA overhead. That
+    \\last assumption matters: real hardware, especially with the
+    \\depacker resident in Chip RAM, will be slower than this, not
+    \\faster - treat these times as a best-case lower bound for
+    \\comparing backends against each other, not a wall-clock guarantee.
+    \\
+    \\bench defaults to inflate/zultra/salvador/shrinkler - store adds
+    \\no compression to compare, and zx0 shares salvador's exact
+    \\decompression cost (same container/depacker) for a much slower
+    \\host-side compress (minutes, not seconds, on a large executable).
+    \\--all runs every backend, store and zx0 included.
+    \\
 ;
 
 pub fn main(init: std.process.Init) !void {
@@ -85,6 +123,11 @@ pub fn main(init: std.process.Init) !void {
     } else if (std.mem.eql(u8, command, "info")) {
         cmdInfo(io, arena, args[2..]) catch |err| {
             std.log.err("info failed: {s}", .{@errorName(err)});
+            return err;
+        };
+    } else if (std.mem.eql(u8, command, "bench")) {
+        cmdBench(io, arena, args[2..]) catch |err| {
+            std.log.err("bench failed: {s}", .{@errorName(err)});
             return err;
         };
     } else if (std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "version")) {
@@ -184,25 +227,35 @@ fn packAuto(arena: std.mem.Allocator, image: flatten.FlatImage, verbose: bool) !
     return .{ best.?, best_name };
 }
 
-fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool) ![]u8 {
-    const payload, const backend_id, const stub_bytes = if (std.mem.eql(u8, backend_name, "store"))
-        .{ try store.compress(arena, image), container.BackendId.store, stub_store }
+const CompressedBackend = struct {
+    payload: []u8,
+    backend_id: container.BackendId,
+    stub_bytes: []const u8,
+    /// Only used by `execram bench` (musashi_bench.parseDepackOffset) -
+    /// see that command's own comment on why it's threaded through here
+    /// rather than re-derived from `stub_bytes` by identity.
+    stub_listing: []const u8,
+};
+
+fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool) !CompressedBackend {
+    const payload, const backend_id, const stub_bytes, const stub_listing = if (std.mem.eql(u8, backend_name, "store"))
+        .{ try store.compress(arena, image), container.BackendId.store, stub_store, listing_store }
     else if (std.mem.eql(u8, backend_name, "inflate"))
-        .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate }
+        .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
     else if (std.mem.eql(u8, backend_name, "zultra"))
         // zultra is a different host-side compressor producing the same
         // raw-DEFLATE format as "inflate" - same backend_id, same stub,
         // see src/backends/zultra_vendor/README.md.
-        .{ try zultra.compress(arena, image), container.BackendId.inflate, stub_inflate }
+        .{ try zultra.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
     else if (std.mem.eql(u8, backend_name, "zx0"))
-        .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0 }
+        .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0 }
     else if (std.mem.eql(u8, backend_name, "salvador"))
         // salvador is a different host-side ZX0 compressor producing the
         // same format as "zx0" - same backend_id, same stub, see
         // src/backends/salvador_vendor/README.md.
-        .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0 }
+        .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0 }
     else if (std.mem.eql(u8, backend_name, "shrinkler"))
-        .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler }
+        .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, listing_shrinkler }
     else {
         std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'zx0'/'salvador'/'shrinkler'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
@@ -210,25 +263,31 @@ fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_n
 
     // M5 pre-flight self-check: decompress what was just produced,
     // host-side, and confirm it reconstructs the original bytes exactly
-    // before ever writing a container to disk. Every backend here is
-    // vendored/adapted third-party code, not something formally proven
-    // correct, so this is cheap, meaningful insurance - the same
-    // "always verify before saving" discipline Shrinkler's own CLI
-    // follows (DataFile.h's own verify() step).
+    // before ever writing a container to disk (or, from `execram
+    // bench`, before ever trusting a Musashi-measured cycle count).
+    // Every backend here is vendored/adapted third-party code, not
+    // something formally proven correct, so this is cheap, meaningful
+    // insurance - the same "always verify before saving" discipline
+    // Shrinkler's own CLI follows (DataFile.h's own verify() step).
     const expected = try std.mem.concat(arena, u8, &.{ image.code_data, image.reloc_stream });
     const decoded = decompressWithBackend(arena, backend_name, payload, expected.len) catch |err| {
-        std.log.err("self-check failed for backend '{s}': decompression errored ({s}) - refusing to write a broken executable", .{ backend_name, @errorName(err) });
+        std.log.err("self-check failed for backend '{s}': decompression errored ({s}) - refusing to trust this backend's output", .{ backend_name, @errorName(err) });
         return error.SelfCheckFailed;
     };
     if (!std.mem.eql(u8, decoded, expected)) {
-        std.log.err("self-check failed for backend '{s}': decompressed output does not match the original bytes - refusing to write a broken executable", .{backend_name});
+        std.log.err("self-check failed for backend '{s}': decompressed output does not match the original bytes - refusing to trust this backend's output", .{backend_name});
         return error.SelfCheckFailed;
     }
     if (verbose) {
         std.log.info("  {s}: {d} -> {d} bytes (self-check OK)", .{ backend_name, expected.len, payload.len });
     }
 
-    const container_bytes = try container.buildContainer(arena, image, backend_id, stub_bytes, payload);
+    return .{ .payload = payload, .backend_id = backend_id, .stub_bytes = stub_bytes, .stub_listing = stub_listing };
+}
+
+fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool) ![]u8 {
+    const compressed = try compressWithBackend(arena, image, backend_name, verbose);
+    const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload);
     return container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
 }
 
@@ -281,6 +340,114 @@ fn cmdInfo(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     try w.flush();
 }
 
+/// `execram bench <in>`: packs `in` with every backend and prints a
+/// comparison table - output size, compression ratio, and 68000
+/// decompression cost measured by actually running each backend's
+/// depacker stub through Musashi (src/musashi_bench.zig - shared with
+/// the standalone tools/bench dev tool, which measures an
+/// already-packed file's stub instead of packing fresh with every
+/// backend at once; see that tool's own README for why *it* remains a
+/// separate, native-host-only binary while this command ships as part
+/// of `execram` itself).
+fn cmdBench(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
+    var all = false;
+    var positional: std.ArrayList([]const u8) = .empty;
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--all")) {
+            all = true;
+        } else {
+            try positional.append(arena, arg);
+        }
+    }
+    if (positional.items.len != 1) {
+        std.log.err("usage: execram bench [--all] <in>", .{});
+        return error.InvalidArguments;
+    }
+    const in_path = positional.items[0];
+    const backends: []const []const u8 = if (all) &backend_names else &bench_default_backend_names;
+
+    const cwd: Io.Dir = .cwd();
+    const input_bytes = try cwd.readFileAlloc(io, in_path, arena, .limited(256 * 1024 * 1024));
+
+    var file = try hunk.parse(arena, input_bytes);
+    defer file.deinit();
+
+    var image = try flatten.flatten(arena, file);
+    defer image.deinit();
+
+    // The same bytes every backend is actually asked to reproduce
+    // (docs/format-spec.md §6) - computed once, reused both to size
+    // the emulated output buffer and to cross-check what Musashi
+    // actually produced against what the backend's own host-side
+    // decompress already proved correct (compressWithBackend's own
+    // self-check, above) - two independent decoders (host Zig/C vs.
+    // the real 68k stub under emulation) agreeing is a meaningfully
+    // stronger guarantee than either alone. This project has hit a
+    // real bug before that passed every host-side test and only
+    // surfaced once the actual depacker stub ran (see
+    // stubs/shrinkler/stub.s's own comment) - this check exists
+    // because of that history, not as generic caution.
+    const expected = try std.mem.concat(arena, u8, &.{ image.code_data, image.reloc_stream });
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    const w = &stdout_writer.interface;
+
+    try w.print("{s:<10} {s:>10} {s:>7}  {s:>13} {s:>10} {s:>7}\n", .{
+        "backend", "size", "ratio", "cycles", "PAL time", "check",
+    });
+    try w.flush();
+    for (backends) |name| {
+        // zx0/salvador/shrinkler's optimal-parse host-side compression
+        // can take minutes on a large real executable (zx0 in
+        // particular - ~508s measured on tests/corpus/hexagon.exe,
+        // 221KB, unrelated to anything Musashi times) - a progress line
+        // per backend, flushed immediately, so a slow run doesn't look
+        // hung. Goes to stderr (std.log), keeping the table itself on
+        // stdout clean to pipe/parse.
+        std.log.info("compressing with {s}...", .{name});
+
+        const compressed = try compressWithBackend(arena, image, name, false);
+
+        const depack_offset = try musashi_bench.parseDepackOffset(compressed.stub_listing);
+        const result = try musashi_bench.timeDepack(
+            arena,
+            compressed.stub_bytes,
+            depack_offset,
+            compressed.payload,
+            @intCast(compressed.payload.len),
+            @intCast(expected.len),
+        );
+
+        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload);
+        const exe_bytes = try container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
+        const ratio = @as(f64, @floatFromInt(exe_bytes.len)) / @as(f64, @floatFromInt(input_bytes.len)) * 100.0;
+
+        const matches = std.mem.eql(u8, result.output, expected);
+        try w.print("{s:<10} {d:>10} {d:>6.1}% {d:>14} {d:>9.4}s {s:>7}\n", .{
+            name, exe_bytes.len, ratio, result.cycles, result.seconds(), if (matches) "OK" else "MISMATCH",
+        });
+        try w.flush();
+        if (!matches) {
+            std.log.err("bench: '{s}' backend's emulated 68000 output does not match its own host-side decompress - this is a real correctness bug, not a timing artifact", .{name});
+            return error.EmulatedOutputMismatch;
+        }
+    }
+    try w.print(
+        \\
+        \\Note: decompression cost is CPU instruction timing only, from
+        \\actually running each depacker on Musashi (a 68000 CPU-core
+        \\emulator) - it assumes zero interrupt/OS/DMA overhead, so real
+        \\hardware (especially with the depacker resident in Chip RAM,
+        \\competing with the copper/blitter/audio for bus cycles) will
+        \\be slower than this, not faster. Treat these times as a
+        \\best-case lower bound for comparing backends against each
+        \\other, not a wall-clock guarantee.
+        \\
+    , .{});
+    try w.flush();
+}
+
 fn printUsage(io: Io) !void {
     var stderr_buffer: [1024]u8 = undefined;
     var stderr_writer: Io.File.Writer = .init(.stderr(), io, &stderr_buffer);
@@ -305,4 +472,5 @@ test {
     _ = zultra;
     _ = salvador;
     _ = shrinkler;
+    _ = musashi_bench;
 }

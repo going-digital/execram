@@ -9,17 +9,18 @@ embed its CPU-only 68000 emulation core, commit
 Musashi is a portable, C-only 68000-68040 instruction-set emulator with
 no chip/disk/video emulation of its own - used standalone as the CPU
 core inside many real emulators (MAME among them). It exists in this
-repo purely to power `tools/bench` (see that directory's own README): a
-dev tool that runs a compiled depacker stub through the real 68000
-instruction set and reports an exact cycle count, as a fast, host-load-
-insensitive alternative to timing decompression under FS-UAE's real-
-time-paced boot process (`tests/uae/`). **It is not linked into the
-`execram` binary itself and is not part of any release archive** -
-that's also why, unlike every other `*_vendor/` directory, nothing here
-is added to `THIRD_PARTY_LICENSES.md` (that file's own preamble scopes
-it to what travels with a redistributed `execram` binary; nothing here
-does - same reasoning `docs/LICENSES.md` §5 already applies to vasm and
-vlink).
+repo to run a compiled depacker stub through the real 68000 instruction
+set and report an exact cycle count, as a fast, host-load-insensitive
+alternative to timing decompression under FS-UAE's real-time-paced boot
+process (`tests/uae/`). Two callers share it via `src/musashi_bench.zig`:
+`tools/bench` (a standalone dev tool, times an already-packed file) and
+`execram bench` (`src/main.zig`, ships as part of the real `execram`
+binary - packs a fresh input with every backend and times each at
+once). Because of the latter, Musashi **is** linked into the shipped
+`execram` binary and **is** part of every release archive - unlike
+every dev/build/test-only tool this project depends on (vasm, vlink,
+FS-UAE), which is why it's also listed in `THIRD_PARTY_LICENSES.md`,
+unlike those.
 
 ## What's vendored, and what isn't
 
@@ -33,7 +34,7 @@ actually needs to compile and run is vendored:
   of whether FPU/68040 emulation is actually configured on, so it's
   vendored even though nothing here ever exercises 68881/68040 opcodes
   (68000-only, `M68K_CPU_TYPE_68000`, is the only CPU type
-  `tools/bench` ever selects).
+  `src/musashi_bench.zig` ever selects).
 - `softfloat/` (`softfloat.c`, `softfloat.h`, `milieu.h`, `mamesf.h`,
   `softfloat-macros`, `softfloat-specialize`) - `m68kfpu.c` needs
   softfloat's implementation to link, again regardless of whether it's
@@ -56,8 +57,8 @@ actually needs to compile and run is vendored:
   into the real build" shape as this project's other build-time code
   generation).
 
-Not vendored: `m68kdasm.c` (disassembler - `tools/bench` doesn't
-disassemble, it only executes and counts cycles), `example/`, `test/`,
+Not vendored: `m68kdasm.c` (disassembler - nothing here disassembles,
+only executes and counts cycles), `example/`, `test/`,
 `softfloat/README.txt`.
 
 ## License
@@ -71,8 +72,8 @@ this README and the vendored files themselves both do.
 
 `m68kconf.h` exposes a large set of compile-time `M68K_EMULATE_*` flags
 for enabling/disabling specific CPU features. None of them are edited
-here - `tools/bench` instead selects the 68000 model entirely at
-runtime via `m68k_set_cpu_type(M68K_CPU_TYPE_68000)`, which is
+here - `src/musashi_bench.zig` instead selects the 68000 model entirely
+at runtime via `m68k_set_cpu_type(M68K_CPU_TYPE_68000)`, which is
 Musashi's own documented, supported way to pick a CPU model without
 touching this file, so the vendored config stays byte-identical to
 upstream.
