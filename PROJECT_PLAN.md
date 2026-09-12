@@ -450,10 +450,37 @@ by renaming only Salvador's copy via compiler `-D` flags (see
   `inflate`'s respectively - both already documented as byte-compatible
   with those formats, so no new vendoring was needed, just reuse.
 
-**M6 — Test matrix & CI** (ongoing from M1)
-- Corpus of rights-cleared real + synthetic executables
-- Headless FS-UAE boot pass/fail per corpus item per backend
-- Ratio/speed regression tracking in CI
+**M6 — Test matrix & CI** ✅ done
+- ~~Corpus of rights-cleared real + synthetic executables~~ — a
+  synthetic corpus (`tests/corpus/gen_corpus.py`), each item targeting
+  one axis the two existing e2e programs didn't reach: `no_relocs`
+  (zero relocation sites - `FLAG_HAS_RELOCS` clear), `chip_mem` (a
+  hunk explicitly requiring Chip RAM, forcing the whole packed program
+  resident there), `bss_heavy` (a 64K BSS, actually read back at
+  runtime to confirm `MEMF_CLEAR` really zeroed it, not just declared),
+  `incompressible` (a deterministic non-repeating payload - the worst
+  case for every LZ-family backend). Sourcing genuinely rights-cleared
+  *real* executables turned out to be its own unresolved licensing
+  question with no clean answer in the time available, so this stayed
+  synthetic-only, same as the existing e2e programs - a reasonable
+  scope call, not an oversight.
+- ~~Headless FS-UAE boot pass/fail per corpus item per backend~~ —
+  `tests/uae/run_corpus_test.sh` boots every corpus item under every
+  backend (4 items x 6 backends = 24 combinations) and diffs the exact
+  expected transcript each time, printing a pass/fail matrix. All 24
+  passed, including two paths never exercised on real hardware before
+  this: Chip RAM allocation (`chip_mem` - previously only checked at
+  the host level, that the header *flag* gets set) and a large BSS
+  actually coming back zeroed (`bss_heavy` - previous BSS segments were
+  declared and sized but never read back to confirm).
+- ~~Ratio/speed regression tracking in CI~~ —
+  `tests/ratio/track_ratios.py` packs the corpus plus the two e2e
+  programs with every backend and compares sizes against a committed
+  baseline (`tests/ratio/baseline.json`), failing only if a backend's
+  output *grows* (an improvement is reported, not treated as a
+  failure - see the script's own module doc for why). Needs no FS-UAE
+  or Kickstart ROM (host-side size/time measurement only), so unlike
+  `tests/uae/*` this runs in `.github/workflows/ci.yml` too.
 
 **M7 — Docs & release**
 - README, format spec, per-backend algorithm notes, contribution guide

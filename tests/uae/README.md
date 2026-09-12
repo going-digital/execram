@@ -164,3 +164,34 @@ exact match underneath. Fixed by putting the pty's slave side into raw
 mode (`termios`, clearing `ONLCR`/`OPOST`) in `pty_bridge.py`, which
 `run_boot_test.sh` and `run_e2e_test.sh` also benefit from even though
 their weaker sentinel-substring checks never depended on it.
+
+## Corpus test matrix (`run_corpus_test.sh`, M6)
+
+`run_e2e_test.sh` and `run_large_e2e_test.sh` each probe one shape of
+program (a couple of relocations; several KB of prose with 22
+relocations). `run_corpus_test.sh` generalizes to N programs x every
+backend: it boots each of `tests/corpus/gen_corpus.py`'s items
+(`no_relocs`, `chip_mem`, `bss_heavy`, `incompressible` - see that
+directory's own README for what each one targets) under every backend
+in turn, diffing the exact expected transcript each time, and prints a
+pass/fail matrix at the end.
+
+```sh
+EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
+  tests/uae/run_corpus_test.sh
+```
+
+Slower than the other two scripts here by design - it boots (corpus
+items) x (backends) times, not once - so expect it to take several
+minutes. `chip_mem` in particular was worth adding: forcing a packed
+program's whole resident block into Chip RAM
+(`stubs/common/runtime.i`'s `MEMF_CHIP` path) had only ever been
+checked at the host level (`container.zig`'s unit test, which just
+confirms the header *flag* gets set) before this matrix put it under a
+real depacker on real (emulated) hardware for the first time.
+`bss_heavy` similarly goes further than `run_large_e2e_test.sh`'s own
+BSS segment (declared, sized, but never read back): it actually samples
+BSS bytes at runtime and reports whether `AllocMem`'s `MEMF_CLEAR`
+really zeroed a nontrivial (64K) region.
+
+Requires the same things as `run_e2e_test.sh`/`run_large_e2e_test.sh`.

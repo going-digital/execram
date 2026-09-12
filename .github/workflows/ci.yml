@@ -45,3 +45,13 @@ jobs:
 
       - name: zig build
         run: zig build --summary all
+
+      # M6 ratio/speed regression tracking (PROJECT_PLAN.md): host-side
+      # only (packs a fixed set of test programs and compares sizes
+      # against the committed baseline) - no FS-UAE, no Kickstart ROM,
+      # so unlike tests/uae/* this can run here. Fails only if a
+      # backend's output *grew* versus the baseline; an improvement is
+      # reported, not treated as a failure - see the script's own
+      # module doc for why.
+      - name: Track compression ratios
+        run: python3 tests/ratio/track_ratios.py ./zig-out/bin/execram vasmm68k_mot vlink

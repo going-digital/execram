@@ -35,7 +35,7 @@ zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=
 
 ## Status
 
-M1-M5 done (store, inflate, zx0, and shrinkler backends all pack and
+M1-M6 done (store, inflate, zx0, and shrinkler backends all pack and
 boot real executables correctly, verified under FS-UAE) — see the
 milestones in [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). `execram
 pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto]
@@ -53,6 +53,15 @@ writing anything: it decompresses what it just produced, host-side,
 and compares it byte-for-byte against the original - refusing to save
 a broken executable rather than shipping one and finding out on real
 hardware.
+
+A synthetic test corpus (`tests/corpus/`) and matrix runner
+(`tests/uae/run_corpus_test.sh`) boot every backend against several
+purpose-built programs - no relocations at all, a Chip-RAM-resident
+hunk, a large BSS actually verified zeroed at runtime, a
+non-compressible payload - catching things the two original e2e
+programs didn't reach; `tests/ratio/track_ratios.py` tracks every
+backend's output size against a committed baseline and runs in CI
+(`.github/workflows/ci.yml`), no Kickstart ROM required.
 
 `zultra` is an alternative, stronger host-side compressor for the same
 container/depacker `inflate` uses (both produce standard raw DEFLATE) —

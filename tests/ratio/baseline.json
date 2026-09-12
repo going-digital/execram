@@ -1,0 +1,158 @@
+{
+  "corpus_bss_heavy": {
+    "inflate": {
+      "seconds": 0.012,
+      "size": 1328
+    },
+    "salvador": {
+      "seconds": 0.014,
+      "size": 512
+    },
+    "shrinkler": {
+      "seconds": 0.013,
+      "size": 616
+    },
+    "store": {
+      "seconds": 0.012,
+      "size": 492
+    },
+    "zultra": {
+      "seconds": 0.013,
+      "size": 1328
+    },
+    "zx0": {
+      "seconds": 0.012,
+      "size": 512
+    }
+  },
+  "corpus_chip_mem": {
+    "inflate": {
+      "seconds": 0.012,
+      "size": 1280
+    },
+    "salvador": {
+      "seconds": 0.013,
+      "size": 464
+    },
+    "shrinkler": {
+      "seconds": 0.013,
+      "size": 572
+    },
+    "store": {
+      "seconds": 0.012,
+      "size": 412
+    },
+    "zultra": {
+      "seconds": 0.014,
+      "size": 1280
+    },
+    "zx0": {
+      "seconds": 0.012,
+      "size": 464
+    }
+  },
+  "corpus_incompressible": {
+    "inflate": {
+      "seconds": 0.014,
+      "size": 1588
+    },
+    "salvador": {
+      "seconds": 0.052,
+      "size": 748
+    },
+    "shrinkler": {
+      "seconds": 0.045,
+      "size": 868
+    },
+    "store": {
+      "seconds": 0.012,
+      "size": 2436
+    },
+    "zultra": {
+      "seconds": 0.015,
+      "size": 1588
+    },
+    "zx0": {
+      "seconds": 0.07,
+      "size": 748
+    }
+  },
+  "corpus_no_relocs": {
+    "inflate": {
+      "seconds": 0.013,
+      "size": 1280
+    },
+    "salvador": {
+      "seconds": 0.014,
+      "size": 464
+    },
+    "shrinkler": {
+      "seconds": 0.014,
+      "size": 572
+    },
+    "store": {
+      "seconds": 0.012,
+      "size": 412
+    },
+    "zultra": {
+      "seconds": 0.015,
+      "size": 1280
+    },
+    "zx0": {
+      "seconds": 0.013,
+      "size": 464
+    }
+  },
+  "large": {
+    "inflate": {
+      "seconds": 0.012,
+      "size": 3620
+    },
+    "salvador": {
+      "seconds": 0.327,
+      "size": 2928
+    },
+    "shrinkler": {
+      "seconds": 0.262,
+      "size": 2832
+    },
+    "store": {
+      "seconds": 0.012,
+      "size": 5480
+    },
+    "zultra": {
+      "seconds": 0.017,
+      "size": 3556
+    },
+    "zx0": {
+      "seconds": 0.756,
+      "size": 2928
+    }
+  },
+  "small": {
+    "inflate": {
+      "seconds": 0.013,
+      "size": 1272
+    },
+    "salvador": {
+      "seconds": 0.013,
+      "size": 456
+    },
+    "shrinkler": {
+      "seconds": 0.013,
+      "size": 564
+    },
+    "store": {
+      "seconds": 0.013,
+      "size": 404
+    },
+    "zultra": {
+      "seconds": 0.013,
+      "size": 1272
+    },
+    "zx0": {
+      "seconds": 0.012,
+      "size": 456
+    }
+  }
+}
