@@ -35,15 +35,24 @@ zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=
 
 ## Status
 
-M1-M4 done (store, inflate, zx0, and shrinkler backends all pack and
+M1-M5 done (store, inflate, zx0, and shrinkler backends all pack and
 boot real executables correctly, verified under FS-UAE) — see the
 milestones in [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). `execram
-pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto] <in>
-<out>` works today (`auto`, the default, tries every backend and keeps
-the smallest result). `shrinkler` - Shrinkler's own LZ + adaptive range
-coder, adapted rather than reimplemented (see
-[docs/LICENSES.md](docs/LICENSES.md)) - usually produces the smallest
-output of all, at the cost of the slowest host-side compression.
+pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto]
+[--mem=chip|fast] [-v] <in> <out>` works today (`auto`, the default,
+tries every backend and keeps the smallest result). `shrinkler` -
+Shrinkler's own LZ + adaptive range coder, adapted rather than
+reimplemented (see [docs/LICENSES.md](docs/LICENSES.md)) - usually
+produces the smallest output of all, at the cost of the slowest
+host-side compression.
+
+`execram info <packed-exe>` reports a packed executable's container
+header fields (backend, memory type, relocations, sizes, ratio)
+without decompressing anything. Every `pack` also self-checks before
+writing anything: it decompresses what it just produced, host-side,
+and compares it byte-for-byte against the original - refusing to save
+a broken executable rather than shipping one and finding out on real
+hardware.
 
 `zultra` is an alternative, stronger host-side compressor for the same
 container/depacker `inflate` uses (both produce standard raw DEFLATE) —

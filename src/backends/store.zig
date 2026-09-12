@@ -16,6 +16,17 @@ pub fn compress(allocator: std.mem.Allocator, image: flatten.FlatImage) ![]u8 {
     return out;
 }
 
+/// Store's "decompression" is the identity function - `payload` already
+/// is the flattened bytes. `expected_len` is only checked, not used to
+/// size anything (unlike the real compression backends, whose C
+/// decoders need a preallocated output buffer) - part of M5's pack-time
+/// self-check (main.zig), which calls every backend's `decompress`
+/// with the same signature.
+pub fn decompress(allocator: std.mem.Allocator, payload: []const u8, expected_len: usize) ![]u8 {
+    if (payload.len != expected_len) return error.StoreDecompressionMismatch;
+    return allocator.dupe(u8, payload);
+}
+
 test "compress concatenates code_data and reloc_stream verbatim" {
     var image = flatten.FlatImage{
         .allocator = std.testing.allocator,

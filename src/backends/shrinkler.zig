@@ -31,6 +31,19 @@ pub fn compress(allocator: std.mem.Allocator, image: flatten.FlatImage) ![]u8 {
     return result;
 }
 
+/// Decompresses via Shrinkler's own reference decoder
+/// (RangeDecoder.h/LZDecoder.h) - an independent code path from the
+/// actual 68k depacker, used both by this module's own round-trip test
+/// and by main.zig's pack-time self-check (M5). `expected_len` sizes
+/// the output buffer the C API needs preallocated.
+pub fn decompress(allocator: std.mem.Allocator, payload: []const u8, expected_len: usize) ![]u8 {
+    const out = try allocator.alloc(u8, expected_len);
+    errdefer allocator.free(out);
+    const decoded_size = c.shrinkler_decompress_buffer(payload.ptr, payload.len, out.ptr, out.len);
+    if (decoded_size != expected_len) return error.ShrinklerDecompressionMismatch;
+    return out;
+}
+
 test "compress produces a smaller result that shrinkler's own decompressor accepts" {
     var image = flatten.FlatImage{
         .allocator = std.testing.allocator,
@@ -48,12 +61,11 @@ test "compress produces a smaller result that shrinkler's own decompressor accep
     defer std.testing.allocator.free(expected);
     try std.testing.expect(compressed.len < expected.len);
 
-    // Round-trip through Shrinkler's own reference decoder
-    // (RangeDecoder.h/LZDecoder.h) - an independent code path from the
-    // actual 68k depacker, same spirit as every other backend's test.
-    const decoded = try std.testing.allocator.alloc(u8, expected.len + 16);
+    // Round-trip through the real `decompress` function above
+    // (Shrinkler's own reference decoder) - an independent code path
+    // from the actual 68k depacker, same spirit as every other
+    // backend's test.
+    const decoded = try decompress(std.testing.allocator, compressed, expected.len);
     defer std.testing.allocator.free(decoded);
-    const decoded_size = c.shrinkler_decompress_buffer(compressed.ptr, compressed.len, decoded.ptr, decoded.len);
-    try std.testing.expect(decoded_size != std.math.maxInt(usize));
-    try std.testing.expectEqualSlices(u8, expected, decoded[0..decoded_size]);
+    try std.testing.expectEqualSlices(u8, expected, decoded);
 }

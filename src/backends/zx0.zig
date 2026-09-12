@@ -6,10 +6,19 @@
 
 const std = @import("std");
 const flatten = @import("../flatten.zig");
+const salvador = @import("salvador.zig");
 
 const c = @cImport({
     @cInclude("shim.h");
 });
+
+/// zx0_vendor has no decompressor of its own (it didn't exist yet when
+/// this backend was written) - salvador is a byte-compatible ZX0
+/// compressor for the exact same depacker (see
+/// src/backends/salvador_vendor/README.md), and its own vendored
+/// decoder happens to cover this backend's needs too. Used by
+/// main.zig's pack-time self-check (M5).
+pub const decompress = salvador.decompress;
 
 pub fn compress(allocator: std.mem.Allocator, image: flatten.FlatImage) ![]u8 {
     const input = try std.mem.concat(allocator, u8, &.{ image.code_data, image.reloc_stream });

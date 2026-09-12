@@ -26,6 +26,22 @@ pub fn compress(allocator: std.mem.Allocator, image: flatten.FlatImage) ![]u8 {
     return allocator.realloc(out, compressed_size);
 }
 
+/// Decompresses via salvador's own vendored decoder - an independent
+/// code path from the actual 68k depacker, used both by this module's
+/// own round-trip test and by main.zig's pack-time self-check (M5), and
+/// by zx0.zig's own `decompress` (see that file's comment on why it
+/// delegates here instead of vendoring a second ZX0 decoder).
+/// `expected_len` sizes the output buffer salvador's C API needs
+/// preallocated - unlike inflate's self-terminating format, ZX0 has no
+/// end-of-stream marker of its own kind that doesn't need one.
+pub fn decompress(allocator: std.mem.Allocator, payload: []const u8, expected_len: usize) ![]u8 {
+    const out = try allocator.alloc(u8, expected_len);
+    errdefer allocator.free(out);
+    const decoded_size = c.salvador_decompress_buffer(payload.ptr, out.ptr, payload.len, out.len);
+    if (decoded_size != expected_len) return error.SalvadorDecompressionMismatch;
+    return out;
+}
+
 test "compress produces a smaller result that salvador's own decompressor accepts" {
     var image = flatten.FlatImage{
         .allocator = std.testing.allocator,
@@ -43,12 +59,11 @@ test "compress produces a smaller result that salvador's own decompressor accept
     defer std.testing.allocator.free(expected);
     try std.testing.expect(compressed.len < expected.len);
 
-    // Round-trip through salvador's own decompressor - an independent
-    // code path from the actual 68k depacker, same spirit as using
-    // Zig's own Decompress for the inflate/zultra backends' tests.
-    const decoded = try std.testing.allocator.alloc(u8, expected.len + 16);
+    // Round-trip through the real `decompress` function above (salvador's
+    // own decoder) - an independent code path from the actual 68k
+    // depacker, same spirit as using Zig's own Decompress for the
+    // inflate/zultra backends' tests.
+    const decoded = try decompress(std.testing.allocator, compressed, expected.len);
     defer std.testing.allocator.free(decoded);
-    const decoded_size = c.salvador_decompress_buffer(compressed.ptr, decoded.ptr, compressed.len, decoded.len);
-    try std.testing.expectEqual(expected.len, decoded_size);
-    try std.testing.expectEqualSlices(u8, expected, decoded[0..decoded_size]);
+    try std.testing.expectEqualSlices(u8, expected, decoded);
 }

@@ -8,10 +8,16 @@
 
 const std = @import("std");
 const flatten = @import("../flatten.zig");
+const inflate = @import("inflate.zig");
 
 const c = @cImport({
     @cInclude("libzultra.h");
 });
+
+/// Zultra produces standard raw DEFLATE - the same format "inflate"
+/// does - so its decompression is exactly Zig's own decoder, not
+/// anything Zultra-specific. Used by main.zig's pack-time self-check.
+pub const decompress = inflate.decompress;
 
 pub fn compress(allocator: std.mem.Allocator, image: flatten.FlatImage) ![]u8 {
     const input = try std.mem.concat(allocator, u8, &.{ image.code_data, image.reloc_stream });
@@ -47,18 +53,16 @@ test "compress produces a raw DEFLATE stream Zig's own decompressor accepts" {
     const compressed = try compress(std.testing.allocator, image);
     defer std.testing.allocator.free(compressed);
 
-    // Round-trip through Zig's own decompressor, same independent check
-    // as the inflate backend's test - proves this is valid DEFLATE, not
-    // just "the vendored library ran without crashing".
-    var reader: std.Io.Reader = .fixed(compressed);
-    var decompress_buffer: [std.compress.flate.max_window_len]u8 = undefined;
-    var decompressor: std.compress.flate.Decompress = .init(&reader, .raw, &decompress_buffer);
-
-    const decoded = try decompressor.reader.allocRemaining(std.testing.allocator, .unlimited);
-    defer std.testing.allocator.free(decoded);
-
     const expected = try std.mem.concat(std.testing.allocator, u8, &.{ image.code_data, image.reloc_stream });
     defer std.testing.allocator.free(expected);
+
+    // Round-trip through Zig's own decompressor (via the real
+    // `decompress` function above, shared with inflate's), same
+    // independent check as the inflate backend's test - proves this is
+    // valid DEFLATE, not just "the vendored library ran without
+    // crashing".
+    const decoded = try decompress(std.testing.allocator, compressed, expected.len);
+    defer std.testing.allocator.free(decoded);
     try std.testing.expectEqualSlices(u8, expected, decoded);
 
     try std.testing.expect(compressed.len < expected.len);

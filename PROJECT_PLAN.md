@@ -420,10 +420,35 @@ by renaming only Salvador's copy via compiler `-D` flags (see
   byte-exact `run_large_e2e_test.sh`, both with
   `EXECRAM_TEST_BACKEND=shrinkler`).
 
-**M5 — Unified CLI polish** (~1–2 weeks)
-- `execram pack [--backend=...] [--mem=chip|fast] [-v] in out`
-- `execram info` (inspect a packed executable)
-- Host-side reference decompressor per backend for pre-flight self-check
+**M5 — Unified CLI polish** ✅ done
+- ~~`execram pack [--backend=...] [--mem=chip|fast] [-v] in out`~~ —
+  `--mem=chip|fast` overrides the auto-detected Chip/Fast RAM choice
+  (warns if forcing `fast` on an input that actually requested Chip
+  RAM, since that can build fine and misbehave only at runtime); `-v`
+  prints per-backend sizes in `--backend=auto` mode plus image
+  statistics (code/data/bss/reloc-stream sizes, detected memory type).
+- ~~`execram info` (inspect a packed executable)~~ — reports every
+  container header field (backend, memory type, relocations, all five
+  size fields, resident size, payload ratio) without decompressing
+  anything. Locating the header in a file whose stub length isn't
+  already known (unlike `pack`, which just produced it) matches each
+  known stub's bytes as a literal prefix (`src/info.zig`) rather than
+  scanning for the "ExCr" magic - the exact trap
+  `tests/uae/e2e/extract_container.py`'s own doc comment already
+  warned about (a coincidental match inside the stub's own
+  `cmp.l #MAGIC,...` instruction encoding).
+- ~~Host-side reference decompressor per backend for pre-flight
+  self-check~~ — every `pack` now decompresses what it just produced
+  and compares it byte-for-byte against the original flattened image
+  before writing anything, refusing to save an executable whose
+  container wouldn't decompress correctly (`error.SelfCheckFailed`)
+  rather than shipping it and finding out on real hardware - the same
+  discipline Shrinkler's own CLI already follows (`DataFile.h`'s
+  `verify()` step). Needed a `decompress` function per backend, added
+  alongside each `compress` (`src/backends/*.zig`): `zx0` and `zultra`
+  don't vendor their own decoders, so they delegate to `salvador`'s and
+  `inflate`'s respectively - both already documented as byte-compatible
+  with those formats, so no new vendoring was needed, just reuse.
 
 **M6 — Test matrix & CI** (ongoing from M1)
 - Corpus of rights-cleared real + synthetic executables
