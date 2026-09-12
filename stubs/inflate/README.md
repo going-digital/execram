@@ -49,7 +49,31 @@ changes.
    label was traced by hand against GAS's forward("f")/backward("b")
    nearest-occurrence resolution rules to get the mapping right.
 
+4. **Every remaining single-digit numeric local label** (`1:`/`1b`/`1f`
+   through `9:`/`9b`/`9f`, ~30 occurrences) renamed to a unique,
+   descriptively-prefixed name (`.bc1`, `.dh4`, `.dl2`, ...) - added
+   2026-09-12, after item 3 above (written 2026-09-11 or earlier) had
+   already confirmed *single-digit* numeric locals worked fine in the
+   `vasmm68k_std` build available at the time. A Homebrew package
+   update to `vasmm68k` 1.8e sometime afterward silently regressed
+   this: its std-syntax module's own documented local-label support
+   (per upstream's `history` file) has only ever been `n$` or `.nnn`,
+   never bare `n:`/`nb`/`nf` - single-digit numeric locals apparently
+   only worked before by some now-lost behavior, not a documented
+   feature, and stopped working entirely with this error ("identifier
+   expected" at every `N:`). `vasmm68k_std -gas` does accept the syntax
+   again, but switches vasm's comment character away from `;` (used
+   throughout every file this stub includes) to GAS's own convention,
+   which is worse, not better. Each renamed label was traced by hand
+   against GAS's forward("f")/backward("b") nearest-occurrence
+   resolution rules, the same rigor item 3 above already used - and
+   independently double-checked by assembling both the original and
+   renamed source with a real GNU binutils `as` (`;`-comments swapped
+   for `|` just for that check, not committed) and confirming the two
+   `.text` sections are byte-for-byte identical.
+
 No logic was changed beyond that: same instructions, same order, just
 different spellings of the same things (`.byte`/`.word`/`.long` instead
 of `dc.b`/`dc.w`/`dc.l`, `0x` hex kept as-is) plus the two macro bodies
-pasted inline instead of expanded by the assembler.
+pasted inline instead of expanded by the assembler, plus item 4's
+label renames.

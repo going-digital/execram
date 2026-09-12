@@ -22,10 +22,14 @@
 ; preprocessor, GNU-as m68k's auto-sizing j<cc> pseudo-branches made
 ; explicit, two macros using numeric local labels above 9 - unsupported
 ; by vasm's std module, confirmed by testing - manually inlined at
-; their single call site with named labels instead). No logic was
-; changed: same instructions, same order, just different spellings of
-; the same things plus two macro bodies pasted inline instead of
-; expanded by the assembler.
+; their single call site with named labels instead; and, added later
+; (2026-09-12) after a vasm package update regressed even single-digit
+; numeric locals, every remaining bare `N:`/`Nb`/`Nf` label renamed to
+; a unique name - see README.md item 4 for the full story and how the
+; rename was verified byte-identical). No logic was changed: same
+; instructions, same order, just different spellings of the same
+; things plus two macro bodies pasted inline instead of expanded by
+; the assembler.
 ;
 ; Preprocessed with: cpp -P -DOPT_STORAGE_OFFSTACK=1 -DOPT_INLINE_FUNCTIONS=0
 ; (all other options at upstream's own defaults - see the options block
@@ -90,37 +94,37 @@ build_code:
         
         moveq   #(16 +1)/2,d1
         moveq   #0,d2
-1:      move.l  d2,-(a6)
-        dbf     d1,1b
+.bc1:   move.l  d2,-(a6)
+        dbf     d1,.bc1
 
         
         subq.w  #1,d0
         move.w  d0,d1
         move.l  a0,a2           
-1:      move.b  (a2)+,d2        
+.bc2:   move.b  (a2)+,d2        
 
         add.b   d2,d2
         addq.w  #1,(a6,d2.w)    
 
-        dbf     d1,1b
+        dbf     d1,.bc2
 
         
         move.l  a6,a2           
         moveq   #16 -1,d1
         moveq   #0,d2           
         move.w  d2,(a6)         
-1:      add.w   (a2),d2
+.bc3:   add.w   (a2),d2
         add.w   d2,d2           
         move.w  d2,(a2)+        
-        dbf     d1,1b
+        dbf     d1,.bc3
 
         
         move.w  d0,d1
         moveq   #127,d4         
         move.l  a0,a2           
-1:      moveq   #0,d5
+.bc4:   moveq   #0,d5
         move.b  (a2)+,d5        
-        beq.w     4f
+        beq.w     .bc11
         subq.w  #1,d5
         move.w  d5,d6
 
@@ -131,17 +135,17 @@ build_code:
 
 
         moveq   #0,d2
-9:      lsr.w   #1,d3
+.bc5:   lsr.w   #1,d3
         roxl.w  #1,d2
-        dbf     d6,9b           
+        dbf     d6,.bc5           
         move.b  d2,d3
         add.w   d3,d3           
         move.w  d0,d6
         sub.w   d1,d6           
         cmp.w   (((16 +1)/2)+1)*4+6(a6),d6 
-        bls.w     9f
+        bls.w     .bc6
         lsl.w   #2,d6           
-9:      cmp.b   #9-1,d5
+.bc6:   cmp.b   #9-1,d5
         bcc.w     codelen_gt_8
 
 codelen_le_8: 
@@ -154,36 +158,36 @@ codelen_le_8:
         neg.w   d7
         and.w   #511,d7
         or.w    d7,d3           
-9:      move.w  d6,(a1,d3.w)
+.bc7:   move.w  d6,(a1,d3.w)
         sub.w   d2,d3
-        bcc.w     9b
-        bra.w     4f
+        bcc.w     .bc7
+        bra.w     .bc11
 
 codelen_gt_8: 
         lsr.w   #8,d2
         subq.b  #8,d5           
         lea     (a1,d3.w),a3    
 
-2:      
+.bc8:
         move.w  (a3),d7         
-        bne.w     3f
+        bne.w     .bc9
         
         addq.w  #1,d4
         move.w  d4,d7
         bset    #15,d7
         move.w  d7,(a3)         
-3:      
+.bc9:
         lsr.b   #1,d2
         addx.w  d7,d7
 
         add.w   d7,d7
         lea     (a1,d7.w),a3    
 
-3:      dbf     d5,2b
+.bc10:  dbf     d5,.bc8
 
         
         move.w  d6,(a3)         
-4:      dbf     d1,1b
+.bc11:  dbf     d1,.bc4
 
         lea     (((16 +1)/2)+1)*4(a6),a6
         movem.l (a6)+,d0-d7
@@ -230,9 +234,9 @@ uncompressed_block:
         moveq   #16,d1
         bsr.w    stream_next_bits 
         addq.w  #2,a5           
-        bra.w     2f              
-1:      move.b  (a5)+,(a4)+
-2:      dbf     d0,1b
+        bra.w     .ub2              
+.ub1:   move.b  (a5)+,(a4)+
+.ub2:   dbf     d0,.ub1
         rts
 
 
@@ -247,16 +251,16 @@ static_huffman:
         moveq   #0,d6
         lea     static_huffman_prefix(pc),a5
         move.w  #((((2 +2)+288 +32)+(256*2+((288)-9)*4))+(256*2+((32)-9)*4))/4-2,d0
-        bra.w     1f
+        bra.w     .dh1
 
         
         
 dynamic_huffman:
         
         move.w  #(((((2 +2)+288 +32)+(256*2+((288)-9)*4))+(256*2+((32)-9)*4))+3*4)/4-2,d0
-1:      moveq   #0,d1
-1:      move.l  d1,-(a6)
-        dbf     d0,1b
+.dh1:   moveq   #0,d1
+.dh2:   move.l  d1,-(a6)
+        dbf     d0,.dh2
         
         moveq   #5,d1
         bsr.w    stream_next_bits
@@ -276,11 +280,11 @@ dynamic_huffman:
         lea     (2 +2)(a6),a0   
         moveq   #0,d2
         move.w  d0,d3
-1:      moveq   #3,d1
+.dh3:   moveq   #3,d1
         bsr.w    stream_next_bits
         move.b  (a1)+,d2
         move.b  d0,(a0,d2.w)    
-        dbf     d3,1b
+        dbf     d3,.dh3
         
         lea     ((2 +2)+288 +32)(a6),a1
         moveq   #19,d0
@@ -294,7 +298,7 @@ dynamic_huffman:
         subq.w  #1,d2           
         move.l  a0,a2           
         move.l  a1,a0           
-1:      bsr.w stream_next_symbol
+.dh4:   bsr.w stream_next_symbol
         cmp.b   #16,d0
         bcs.w     c_lit
         beq.w     c_16
@@ -304,32 +308,32 @@ c_18:
         moveq   #7,d1
         bsr.w    stream_next_bits
         addq.w  #11-3,d0
-        bra.w     2f
+        bra.w     .dh5
 c_17:   
         moveq   #3,d1
         bsr.w    stream_next_bits
-2:      moveq   #0,d1
-        bra.w     3f
+.dh5:   moveq   #0,d1
+        bra.w     .dh6
 c_16:   
         moveq   #2,d1
         bsr.w    stream_next_bits
         move.b  -1(a2),d1
-3:      addq.w  #3-1,d0
+.dh6:   addq.w  #3-1,d0
         sub.w   d0,d2
-4:      move.b  d1,(a2)+
-        dbf     d0,4b
-        bra.w     5f
+.dh7:   move.b  d1,(a2)+
+        dbf     d0,.dh7
+        bra.w     .dh8
 c_lit:  
         move.b  d0,(a2)+
-5:      dbf     d2,1b
+.dh8:   dbf     d2,.dh4
         
 
         
         
         moveq   #0,d0
         move.w  #(256*2+((19)-9)*4)/4-1,d1
-1:      move.l  d0,(a0)+
-        dbf     d1,1b
+.dh9:   move.l  d0,(a0)+
+        dbf     d1,.dh9
         
 
         lea     (2 +2)(a6),a0
@@ -354,19 +358,19 @@ c_lit:
 decode_loop:
         lea     ((2 +2)+288 +32)(a6),a0
         
-2:      bsr.w stream_next_symbol 
+.dl1:   bsr.w stream_next_symbol 
 
         cmp.w   d4,d0    
 
-        bcc.w     2f       
+        bcc.w     .dl3       
         
         move.b  d0,(a4)+ 
-        bra.w     2b       
+        bra.w     .dl1       
         
-9:      
+.dl2:
         lea     (((((2 +2)+288 +32)+(256*2+((288)-9)*4))+(256*2+((32)-9)*4))+3*4)(a6),a6
         rts
-2:      beq.w     9b
+.dl3:   beq.w     .dl2
         
 
         lea     ((((((((2 +2)+288 +32)+(256*2+((288)-9)*4))+(256*2+((32)-9)*4))+3*4))+4)+30*4)-257*4(a6),a2
@@ -387,12 +391,12 @@ decode_loop:
         sub.w   d0,a0           
 
         lsr.w   #1,d3
-        bcs.w     4f
+        bcs.w     .dl5
         subq.w  #1,d3
-3:      move.b  (a0)+,(a4)+
-4:      move.b  (a0)+,(a4)+
+.dl4:   move.b  (a0)+,(a4)+
+.dl5:   move.b  (a0)+,(a4)+
 
-        dbf     d3,3b
+        dbf     d3,.dl4
         bra.w     decode_loop
 
 
@@ -444,17 +448,17 @@ SNS_L5:
                                                                          
 build_base_extrabits:
 
-1:      move.w  d0,d3
+.bbe1:  move.w  d0,d3
         lsr.w   d4,d3
         subq.w  #1,d3
-        bcc.w     2f
+        bcc.w     .bbe2
         moveq   #0,d3
-2:      moveq   #0,d1
+.bbe2:  moveq   #0,d1
         bset    d3,d1    
         sub.w   d1,d2    
         move.w  d2,-(a6)
         move.w  d3,-(a6)
-        dbf     d0,1b
+        dbf     d0,.bbe1
 
         rts
 
@@ -490,7 +494,7 @@ inflate:
         moveq   #0,d5           
         moveq   #0,d6           
 
-1:      
+.infl1:
         moveq   #3,d1
         bsr.w    stream_next_bits
         move.l  d0,-(a6)
@@ -502,7 +506,7 @@ inflate:
         
         move.l  (a6)+,d0
         lsr.b   #1,d0
-        bcc.w     1b
+        bcc.w     .infl1
 
         
         lea     (30+29)*4(a6),a6
