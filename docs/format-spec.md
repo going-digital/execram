@@ -1,10 +1,10 @@
 # execram container format — v0
 
-**Status:** draft, unimplemented. Nothing has shipped yet, so this format
-is free to change during M1-M4 as the hunk engine and each backend get
-built against it. Treat this as the contract those milestones implement
-and test against, not a frozen spec — this note will be removed once a
-release actually depends on format stability.
+**Status:** shipped as of v1.0. All six backends (store, inflate, zultra,
+zx0, salvador, shrinkler) implement this exact format, verified against
+real emulated 68k hardware (`tests/uae/`) as well as host-side unit
+tests. §9's versioning policy is now live: a change to anything a stub
+*must* understand needs a `version_major` bump, not a silent edit here.
 
 ## 1. Two-layer model
 
@@ -208,9 +208,12 @@ safely ignore (a newly-meaningful reserved flag bit, say).
 
 ## 10. Open items for later milestones
 
-- Reloc stream encoding (§7) is unvalidated against real executables —
-  M1 should check it against actual reloc counts/densities before
-  treating it as settled.
+- ~~Reloc stream encoding (§7) is unvalidated against real
+  executables~~ — validated: `tests/uae/e2e_large/` exercises 22
+  relocations (20 self-hunk, 2 cross-hunk) and `tests/corpus/`'s
+  `bss_heavy` item adds a real CODE→BSS relocation target, all
+  byte-exact-verified on real hardware. No density or pattern problems
+  found; §7 stands as originally specified.
 - Overlap-in-place decompression (§8's future optimization) — needs a
   proven safety-margin formula per backend before it can ship; each
   backend's `docs/algorithm-notes/` entry should derive one when ready.

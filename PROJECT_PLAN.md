@@ -482,9 +482,30 @@ by renaming only Salvador's copy via compiler `-D` flags (see
   or Kickstart ROM (host-side size/time measurement only), so unlike
   `tests/uae/*` this runs in `.github/workflows/ci.yml` too.
 
-**M7 — Docs & release**
-- README, format spec, per-backend algorithm notes, contribution guide
-- v1.0 once Inflate + ZX0 are solid; Shrinkler-class ships as v1.x
+**M7 — Docs & release** ✅ done
+- ~~README, format spec, per-backend algorithm notes, contribution
+  guide~~ — README.md rewritten for a shipped tool rather than an
+  in-progress one; `docs/format-spec.md`'s stale "draft, unimplemented"
+  status note updated to reflect that all six backends now implement
+  it, verified on real hardware; `docs/algorithm-notes/` created (one
+  page per backend *format* - store, inflate/DEFLATE, zx0, shrinkler -
+  distinct from each vendor directory's own provenance-focused
+  README); `CONTRIBUTING.md` added, covering the project's actual
+  hard-won conventions (real-hardware verification isn't optional for
+  pipeline changes, vendoring philosophy, how to add a backend).
+  Also added, not originally listed here but a real gap the M0 audit's
+  own summary had flagged and left open: `LICENSE` (MIT, for execram's
+  own code) and `THIRD_PARTY_LICENSES.md` (consolidated notices for
+  every vendored license currently in the tree, grouped by license text
+  rather than duplicated per file).
+- ~~v1.0 once Inflate + ZX0 are solid; Shrinkler-class ships as v1.x~~ —
+  development didn't proceed in the phased order this line originally
+  assumed: by the time M7 started, M1-M6 were *all* already done and
+  hardware-verified, Shrinkler-class included. Shipping an
+  Inflate/ZX0-only v1.0 and deferring a working, tested Shrinkler
+  backend to a later release would have been artificial at that point,
+  so v1.0 ships as everything in one release instead - a deliberate
+  adaptation to how the work actually landed, not a scope cut.
 
 ## 8. Testing strategy
 

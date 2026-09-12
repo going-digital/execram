@@ -2,12 +2,17 @@
 
 An executable compressor for Amiga programs, in the spirit of
 [Shrinkler](https://github.com/askeksa/Shrinkler), with pluggable
-compression backends (Inflate, [ZX0](https://github.com/einar-saukas/ZX0),
-and a Shrinkler-class LZMA-like algorithm).
+compression backends: DEFLATE ([inflate](docs/algorithm-notes/inflate.md)),
+[ZX0](docs/algorithm-notes/zx0.md), and
+[Shrinkler's own LZ77 + adaptive range coder](docs/algorithm-notes/shrinkler.md) -
+plus alternative, stronger host-side compressors (`zultra`, `salvador`)
+for the DEFLATE and ZX0 depackers respectively, sharing them without
+needing a new stub.
 
-See [PROJECT_PLAN.md](PROJECT_PLAN.md) for architecture and milestones, and
-[docs/LICENSES.md](docs/LICENSES.md) for the third-party license audit
-covering the reference implementations this project builds on.
+v1.0: every backend packs and boots real Amiga executables correctly,
+verified against real emulated 68k hardware, not just host-side tests -
+see [Status](#status) below and [PROJECT_PLAN.md](PROJECT_PLAN.md) for
+the full milestone history.
 
 ## Building
 
@@ -69,3 +74,19 @@ see [src/backends/zultra_vendor/README.md](src/backends/zultra_vendor/README.md)
 Likewise, `salvador` is an alternative host-side compressor for the same
 container/depacker `zx0` uses (both produce the same ZX0 v2 format) —
 see [src/backends/salvador_vendor/README.md](src/backends/salvador_vendor/README.md).
+
+## Documentation
+
+- [PROJECT_PLAN.md](PROJECT_PLAN.md) - architecture, milestones, and the reasoning behind each
+- [docs/format-spec.md](docs/format-spec.md) - the container format every backend's stub implements
+- [docs/algorithm-notes/](docs/algorithm-notes/) - how each backend's compression format actually works
+- [docs/LICENSES.md](docs/LICENSES.md) - the full third-party license audit
+- [CONTRIBUTING.md](CONTRIBUTING.md) - building, testing, and adding a backend
+
+## License
+
+execram's own code is [MIT-licensed](LICENSE). Several vendored
+third-party components carry their own separate (all permissive, none
+copyleft) licenses - see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
+for the consolidated notices and [docs/LICENSES.md](docs/LICENSES.md)
+for the full audit behind them.
