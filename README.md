@@ -14,6 +14,13 @@ verified against real emulated 68k hardware, not just host-side tests -
 see [Status](#status) below and [PROJECT_PLAN.md](PROJECT_PLAN.md) for
 the full milestone history.
 
+Prebuilt binaries for Linux (x86_64/aarch64/arm), macOS
+(x86_64/aarch64), and Windows (x86_64/aarch64) are published on the
+[Releases page](../../releases) for every tagged version - see
+[CONTRIBUTING.md](CONTRIBUTING.md#releasing) for how those are built.
+Building from source (below) is the only option for anything not
+tagged yet.
+
 ## Building
 
 Requires [Zig 0.16](https://ziglang.org/) and two builds of

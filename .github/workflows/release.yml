@@ -1,0 +1,171 @@
+name: Release
+
+# Triggered by pushing a version tag (v1.0, v1.0.1, ...), or manually
+# via "Run workflow" with a tag picked from the ref selector - either
+# way, GITHUB_REF is a tag ref and the tag name is read from it, so
+# there's exactly one place that derives it.
+#
+# Builds execram for all seven target platforms from a single
+# ubuntu-latest runner - one of Zig's own strengths (`-Dtarget=`
+# cross-compilation), so no per-OS runner is needed for the build
+# itself the way it would be for a typical C/C++ project. Assumes the
+# tagged commit already passed the regular CI workflow
+# (.github/workflows/ci.yml, including tests/ratio/track_ratios.py's
+# regression check) - this workflow re-runs `zig build test` as its own
+# gate before releasing anything, but doesn't duplicate everything CI
+# already checked.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+
+      # Same as .github/workflows/ci.yml - see that file's own comment
+      # on why these are built from source every run rather than
+      # vendored.
+      - name: Build vasm (m68k/mot and m68k/std)
+        run: |
+          curl -sL -o /tmp/vasm.tar.gz http://sun.hasenbraten.de/vasm/release/vasm.tar.gz
+          tar xzf /tmp/vasm.tar.gz -C /tmp
+          make -C /tmp/vasm CPU=m68k SYNTAX=mot
+          make -C /tmp/vasm CPU=m68k SYNTAX=std
+          echo "/tmp/vasm" >> "$GITHUB_PATH"
+
+      - name: Build vlink
+        run: |
+          curl -sL -o /tmp/vlink.tar.gz http://sun.hasenbraten.de/vlink/release/vlink.tar.gz
+          tar xzf /tmp/vlink.tar.gz -C /tmp
+          make -C /tmp/vlink
+          echo "/tmp/vlink" >> "$GITHUB_PATH"
+
+      - name: zig build test
+        run: zig build test --summary all
+
+  create-release:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      # Draft, not published, until every target below has uploaded its
+      # asset - so a partial/broken release is never visible publicly
+      # if one target fails to build. Reuses an existing draft rather
+      # than failing outright, so re-running this workflow after fixing
+      # a build problem doesn't require deleting the old draft first.
+      - name: Create or reuse draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.tag.outputs.tag }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "release ${{ steps.tag.outputs.tag }} already exists, reusing it"
+          else
+            gh release create "${{ steps.tag.outputs.tag }}" \
+              --draft \
+              --title "${{ steps.tag.outputs.tag }}" \
+              --generate-notes \
+              --repo "${{ github.repository }}"
+          fi
+
+  build:
+    needs: create-release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux-musl
+            suffix: linux-x86_64
+            archive: tar.gz
+          - target: aarch64-linux-musl
+            suffix: linux-aarch64
+            archive: tar.gz
+          - target: arm-linux-musleabihf
+            suffix: linux-arm
+            archive: tar.gz
+          - target: x86_64-macos
+            suffix: macos-x86_64
+            archive: tar.gz
+          - target: aarch64-macos
+            suffix: macos-aarch64
+            archive: tar.gz
+          - target: x86_64-windows-gnu
+            suffix: windows-x86_64
+            archive: zip
+          - target: aarch64-windows-gnu
+            suffix: windows-aarch64
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+
+      # Only vasm is needed here, not vlink: `zig build` (unlike
+      # `zig build test`) never touches the vlink-linked test fixtures
+      # - see build.zig's own comment on why those are test_module-only.
+      - name: Build vasm (m68k/mot and m68k/std)
+        run: |
+          curl -sL -o /tmp/vasm.tar.gz http://sun.hasenbraten.de/vasm/release/vasm.tar.gz
+          tar xzf /tmp/vasm.tar.gz -C /tmp
+          make -C /tmp/vasm CPU=m68k SYNTAX=mot
+          make -C /tmp/vasm CPU=m68k SYNTAX=std
+          echo "/tmp/vasm" >> "$GITHUB_PATH"
+
+      - name: Build execram for ${{ matrix.target }}
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast --summary all
+
+      - name: Package
+        id: package
+        run: |
+          TAG="${{ needs.create-release.outputs.tag }}"
+          STAGE="dist/execram-$TAG-${{ matrix.suffix }}"
+          mkdir -p "$STAGE"
+          BIN="zig-out/bin/execram"
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          cp "$BIN" "$STAGE/"
+          cp README.md LICENSE THIRD_PARTY_LICENSES.md "$STAGE/"
+          ASSET="execram-$TAG-${{ matrix.suffix }}.${{ matrix.archive }}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd dist && zip -r "../$ASSET" "execram-$TAG-${{ matrix.suffix }}")
+          else
+            tar czf "$ASSET" -C dist "execram-$TAG-${{ matrix.suffix }}"
+          fi
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Upload asset to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.create-release.outputs.tag }}" \
+            "${{ steps.package.outputs.asset }}" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+  publish:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release (undraft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ needs.create-release.outputs.tag }}" \
+            --draft=false \
+            --repo "${{ github.repository }}"

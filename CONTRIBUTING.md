@@ -109,3 +109,35 @@ you do vendor something:
   debugging trail for real bugs found (what broke, how it was
   diagnosed, what the fix was and why) - not just "fix bug in X". The
   git log is itself part of this project's documentation.
+
+## Releasing
+
+Push a tag matching `v*` (e.g. `v1.0.1`) to `main` -
+`.github/workflows/release.yml` takes it from there: re-runs
+`zig build test` as its own gate, then cross-compiles execram for all
+seven target platforms from a single `ubuntu-latest` runner (one of
+Zig's own strengths - no per-OS runner needed for the build itself),
+packages each as an archive, and publishes a GitHub Release once every
+target has uploaded successfully (a draft the whole time before that,
+so a partial/broken release is never visible if one target fails).
+
+Bump `build.zig.zon`'s own `.version` field to match before tagging -
+`execram --version` reads it directly, so the two should never drift.
+The tagged commit is assumed to have already passed the regular CI
+workflow; the release workflow doesn't duplicate every check CI already
+does (`tests/ratio/track_ratios.py` in particular), only `zig build
+test`.
+
+Cross-compiling to a target this project had never built for before
+(`arm-linux-musleabihf`, by way of validating the whole matrix) found a
+real, previously-latent bug: `zultra_vendor/dictionary.c`'s unused
+(by us) preset-dictionary-file feature used `off_t`/`ftello` without
+the POSIX feature-test macro musl's headers gate them behind under
+plain `-std=c99` - invisible on macOS, whose libc doesn't gate these
+the same way, so nothing before this had ever hit it. See `build.zig`'s
+own comment on the fix (`-D_POSIX_C_SOURCE=200809L`, not a source
+edit). Verified the whole matrix builds and links cleanly, and smoke-
+tested the one target matching this development machine's own
+architecture against the existing test corpus - real execution on real
+hardware for the other six targets (particularly the 32-bit ARM one)
+hasn't been separately verified beyond that.

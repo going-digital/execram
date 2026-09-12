@@ -67,6 +67,12 @@ pub fn build(b: *std.Build) void {
     });
     const exe = b.addExecutable(.{ .name = "execram", .root_module = exe_module });
 
+    // Makes `@import("build_zon").version` resolve to build.zig.zon's own
+    // `.version` field in main.zig - a single source of truth for the
+    // version string `execram --version` prints, instead of hand-syncing
+    // a separate constant on every release.
+    exe_module.addAnonymousImport("build_zon", .{ .root_source_file = b.path("build.zig.zon") });
+
     // A *separate* module for the test binary, sharing the same root
     // source file but not the same Module object as `exe` - so
     // test-only anonymous imports (the vlink-dependent fixtures below)
@@ -78,6 +84,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // main.zig's top-level `@import("build_zon")` needs this registered
+    // on *every* module compiling that file, test_module included, or
+    // the import fails to resolve there even though tests never call
+    // the version-printing code that actually uses it.
+    test_module.addAnonymousImport("build_zon", .{ .root_source_file = b.path("build.zig.zon") });
     const exe_tests = b.addTest(.{ .root_module = test_module });
 
     // The zx0 and zultra backends' host-side compressors are vendored C
@@ -109,7 +120,15 @@ pub fn build(b: *std.Build) void {
                 "libdivsufsort/lib/sssort.c",
                 "libdivsufsort/lib/trsort.c",
             },
-            .flags = &.{"-std=c99"},
+            // -D_POSIX_C_SOURCE=200809L: dictionary.c's (unused by us -
+            // zultra's own optional preset-dictionary-file feature,
+            // never called from zultra.zig) `off_t`/`ftello` need a
+            // POSIX feature-test macro exposed, which plain -std=c99
+            // doesn't imply on strict libcs. Never surfaced on macOS
+            // (Apple's libc doesn't gate these behind one), only found
+            // by actually cross-compiling to a musl target - see
+            // .github/workflows/release.yml.
+            .flags = &.{ "-std=c99", "-D_POSIX_C_SOURCE=200809L" },
         });
 
         // salvador_vendor's own files use a bare `#include

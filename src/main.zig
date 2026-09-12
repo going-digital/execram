@@ -1,6 +1,11 @@
 const std = @import("std");
 const Io = std.Io;
 
+// build.zig.zon itself, imported as data (build.zig wires this up) - a
+// single source of truth for the version string `--version` prints,
+// rather than a hand-synced constant that can drift from a release tag.
+const build_zon = @import("build_zon");
+
 const hunk = @import("hunk.zig");
 const flatten = @import("flatten.zig");
 const container = @import("container.zig");
@@ -32,6 +37,7 @@ const usage =
     \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto]
     \\               [--mem=chip|fast] [-v] <in> <out>
     \\  execram info <packed-exe>
+    \\  execram --version
     \\
     \\--backend=auto (the default) tries every backend and keeps
     \\whichever produces the smallest output. zultra and salvador are
@@ -81,9 +87,19 @@ pub fn main(init: std.process.Init) !void {
             std.log.err("info failed: {s}", .{@errorName(err)});
             return err;
         };
+    } else if (std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "version")) {
+        try printVersion(io);
     } else {
         try printUsage(io);
     }
+}
+
+fn printVersion(io: Io) !void {
+    var stdout_buffer: [64]u8 = undefined;
+    var stdout_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    const w = &stdout_writer.interface;
+    try w.print("execram {s}\n", .{build_zon.version});
+    try w.flush();
 }
 
 fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
