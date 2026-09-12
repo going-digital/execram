@@ -23,6 +23,7 @@ const stubs = [_]Stub{
     .{ .name = "stub_store", .source = "stubs/store/stub.s", .include_dir = "stubs/common" },
     .{ .name = "stub_inflate", .source = "stubs/inflate/stub.s", .include_dir = "stubs/inflate", .syntax = .std },
     .{ .name = "stub_zx0", .source = "stubs/zx0/stub.s", .include_dir = "stubs/common" },
+    .{ .name = "stub_shrinkler", .source = "stubs/shrinkler/stub.s", .include_dir = "stubs/common" },
 };
 
 /// A real hunk executable built at test time (vasm assembles to a linkable
@@ -160,6 +161,43 @@ pub fn build(b: *std.Build) void {
                 "-Dsssort=salvador_sssort",
                 "-Dtrsort=salvador_trsort",
             },
+        });
+
+        // The shrinkler backend's host-side compressor is vendored C++
+        // (docs/LICENSES.md #1), not C like the others - Shrinkler's
+        // own LZ optimal parser/range coder (src/backends/shrinkler_vendor/README.md).
+        // Needs link_libcpp (not just link_libc) for the C++ standard
+        // library (<vector>, <algorithm>, ...) the vendored headers use.
+        mod.link_libcpp = true;
+        // Needed for @cImport's @cInclude("shrinkler_shim.h") to find
+        // it (no "including file's own directory" preference the way
+        // a real C #include has - see salvador_shim.h's own comment).
+        // Safe to put on the module's *global* include path, unlike a
+        // first attempt at this: that one also carried this
+        // directory's own `assert.h`, which deliberately shadows the
+        // *system* assert.h (upstream's own single-translation-unit
+        // design) and so also shadowed it for every other vendor's
+        // unrelated `#include <assert.h>` once this directory was
+        // globally visible - see shrinkler_assert.h's own comment for
+        // the rename that fixed this.
+        mod.addIncludePath(b.path("src/backends/shrinkler_vendor"));
+        mod.addCSourceFiles(.{
+            .root = b.path("src/backends/shrinkler_vendor"),
+            .files = &.{"shrinkler_shim.cpp"},
+            // -fno-sanitize=shift: RangeCoder.h's `dest_bit` starts at
+            // -1 and gets left-shifted on the very first code() call
+            // (`dest_bit << BIT_PRECISION`) - implementation-defined
+            // (not undefined - the C++ standard just doesn't mandate
+            // two's-complement) but universally consistent on every
+            // real compiler/architecture, and upstream's own shipped
+            // behavior for 20+ years. Zig's Debug builds add UBSan
+            // shift-trapping to vendored C/C++ too, which crashes on
+            // this - not a bug in the vendored math (verified: the
+            // subsequent round-trip test we run passes once this trap
+            // is disabled), so this is suppressed rather than editing
+            // vendored numeric code to dodge a sanitizer upstream never
+            // built against.
+            .flags = &.{ "-std=c++11", "-fno-sanitize=shift" },
         });
     }
 

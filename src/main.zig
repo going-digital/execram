@@ -9,6 +9,7 @@ const inflate = @import("backends/inflate.zig");
 const zx0 = @import("backends/zx0.zig");
 const zultra = @import("backends/zultra.zig");
 const salvador = @import("backends/salvador.zig");
+const shrinkler = @import("backends/shrinkler.zig");
 
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
 /// Real backends replace this in later milestones (see PROJECT_PLAN.md).
@@ -19,22 +20,24 @@ const stub_example = @embedFile("stub_example");
 const stub_store = @embedFile("stub_store");
 const stub_inflate = @embedFile("stub_inflate");
 const stub_zx0 = @embedFile("stub_zx0");
+const stub_shrinkler = @embedFile("stub_shrinkler");
 
-const backend_names = [_][]const u8{ "store", "inflate", "zultra", "zx0", "salvador" };
+const backend_names = [_][]const u8{ "store", "inflate", "zultra", "zx0", "salvador", "shrinkler" };
 
 const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|auto] <in> <out>
+    \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto] <in> <out>
     \\  execram info <packed-exe>
     \\
     \\--backend=auto (the default) tries every backend and keeps
     \\whichever produces the smallest output. zultra and salvador are
     \\alternative compressors for the same container/depacker "inflate"
     \\and "zx0" use respectively - both aim for better ratios at the
-    \\cost of host-side compression time. shrinkler lands in a later
-    \\milestone - see PROJECT_PLAN.md.
+    \\cost of host-side compression time. shrinkler is a from-Shrinkler
+    \\LZ + adaptive range coder backend with its own container/depacker -
+    \\usually the smallest output of all, also the slowest to compress.
     \\
 ;
 
@@ -72,7 +75,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate|zultra|zx0|salvador|auto] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -133,8 +136,10 @@ fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_n
         // same format as "zx0" - same backend_id, same stub, see
         // src/backends/salvador_vendor/README.md.
         .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0 }
+    else if (std.mem.eql(u8, backend_name, "shrinkler"))
+        .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler }
     else {
-        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'zx0'/'salvador'/'auto' exist so far", .{backend_name});
+        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'zx0'/'salvador'/'shrinkler'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
     };
 
@@ -164,4 +169,5 @@ test {
     _ = zx0;
     _ = zultra;
     _ = salvador;
+    _ = shrinkler;
 }

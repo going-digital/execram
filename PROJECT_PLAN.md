@@ -373,20 +373,52 @@ by renaming only Salvador's copy via compiler `-D` flags (see
 `build.zig`), no source edits needed. See
 `src/backends/salvador_vendor/README.md` and `docs/LICENSES.md` §7.
 
-**M4 — Shrinkler-class backend** (~4–8+ weeks, highest effort, now lower-risk)
+**M4 — Shrinkler-class backend** ✅ done
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
   is public-domain-equivalent and the rest of its codebase is permissive
-  attribution-only — so this backend may directly study/adapt/port
-  Shrinkler's actual compressor design and depacker asm (crediting per
-  `docs/LICENSES.md`), rather than being restricted to a clean-room
-  reimplementation from the algorithm description
-- Host: LZ77 + adaptive range coder + context modeling + optimal parsing
-  (port or reimplement in Zig, informed directly by Shrinkler's source)
-- 68k range-decoder + copy-loop stub, hand-tuned, adapted from
-  `ShrinklerDecompress.S` where useful
-- **Deliverable:** fourth backend competitive with Shrinkler's ratio class
-  (a target, not a guarantee — still the long pole of the whole project,
-  but the legal uncertainty that made it the highest-risk milestone is gone)
+  attribution-only — so this backend directly adapts/ports Shrinkler's
+  actual compressor and depacker asm (crediting per `docs/LICENSES.md`),
+  not a clean-room reimplementation from the algorithm description.
+- ~~Host: LZ77 + adaptive range coder + context modeling + optimal
+  parsing~~ — vendored Shrinkler's own C++ cruncher core
+  (`src/backends/shrinkler_vendor/`, zlib license), called through a
+  thin C-linkage shim, the same "vendor working code, don't clean-room
+  reimplement" approach as the other three backends. Unlike those,
+  this is C++ (`link_libcpp`, not `link_libc`) - Shrinkler's own
+  optimal-parse LZ77 + adaptive range coder + LZMA-family context
+  model, in the "--data" (raw buffer) mode.
+- ~~68k range-decoder + copy-loop stub, hand-tuned, adapted from
+  `ShrinklerDecompress.S`~~ — the actual routine (trimmed of the
+  file-loading half it ships with, which needs dos.library and isn't
+  used here), not a reimplementation, adapted into `stubs/shrinkler/`.
+  Needed real adapter code, unlike zx0/inflate/zultra/salvador: it
+  takes a progress-callback pointer and a parity-context flag
+  `runtime.i`'s plain `Depack` contract has no way to express, and (the
+  actual bug this surfaced) its own "preserves A2-A6" promise only
+  holds in the sense that it never *writes* those registers - handing
+  it a *different* A2 than runtime.i still needs back is still wrong,
+  and an early version of this stub did exactly that. Found the hard
+  way: it passed the C++ round-trip test *and* a real-hardware test
+  that called the depacker directly (bypassing `runtime.i` entirely),
+  and only failed in the full pack → boot → decompress → relocate →
+  jump pipeline - see `stubs/shrinkler/stub.s`'s own comment for the
+  full trail (isolating each layer - host encoder vs. real upstream
+  Shrinkler's own CLI output byte-for-byte; the depacker alone against
+  known-good compressed bytes on real hardware; the container header
+  fields - before finding it).
+- **Deliverable:** the best ratio of all five backends, as expected for
+  Shrinkler's more sophisticated model - on the large test program
+  (`tests/uae/e2e_large/`): 2832 bytes (49.0% of the 5784-byte
+  original), beating zx0/salvador's shared 2928 (50.6%). Verified the
+  same two ways as every other backend, plus one more given what the
+  bug above took to find: byte-level (a real compress-then-decompress
+  round-trip through Shrinkler's own vendored reference decoder), an
+  isolated real-hardware test of the depacker alone against known-good
+  compressed bytes (bypassing the container pipeline entirely, once
+  the round-trip test alone proved insufficient to catch the A2 bug),
+  and the full pipeline on real hardware (`run_e2e_test.sh` and the
+  byte-exact `run_large_e2e_test.sh`, both with
+  `EXECRAM_TEST_BACKEND=shrinkler`).
 
 **M5 — Unified CLI polish** (~1–2 weeks)
 - `execram pack [--backend=...] [--mem=chip|fast] [-v] in out`

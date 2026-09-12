@@ -57,7 +57,7 @@ not just the bare sentinel:
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   EXECRAM_TEST_BACKEND=inflate \
-  tests/uae/run_e2e_test.sh   # or store/zultra/zx0/salvador (script default: store)
+  tests/uae/run_e2e_test.sh   # or store/zultra/zx0/salvador/shrinkler (script default: store)
 ```
 
 The inflate and zultra backends also need `EXECRAM_VASM_STD` (a
@@ -66,11 +66,11 @@ The inflate and zultra backends also need `EXECRAM_VASM_STD` (a
 `PATH`. (`zultra` uses `inflate`'s exact same stub - see
 `src/backends/zultra_vendor/README.md` - so it needs `vasmm68k_std` for
 the same reason `inflate` does, not a reason of its own. Likewise
-`salvador` uses `zx0`'s stub - see
-`src/backends/salvador_vendor/README.md` - so it has no `vasmm68k_std`
-need of its own either; `EXECRAM_VASM_STD` is needed regardless of
-which backend is under test, since `zig build` always assembles every
-stub, `stub_inflate` included.)
+`salvador` uses `zx0`'s stub, and `shrinkler` has its own dedicated
+stub (`stubs/shrinkler/`) - neither needs `vasmm68k_std` for their own
+sake; `EXECRAM_VASM_STD` is needed regardless of which backend is under
+test, since `zig build` always assembles every stub, `stub_inflate`
+included.)
 
 It builds `execram`, links `e2e/program.s` (a small program with both a
 cross-hunk and a self-hunk relocation) into a real executable, packs it
@@ -112,6 +112,21 @@ with no header/payload/stub involved, couldn't have caught any of them):
   but `io_Error` came back non-zero). Fixed by rounding the read length
   up to the next sector - the handful of extra zero bytes that reads in
   are never examined by anything downstream.
+- The shrinkler backend's stub zeroed A2 (Shrinkler's own "no progress
+  callback" input) without saving/restoring it first, silently
+  corrupting every container-header field `runtime.i` reads *after*
+  decompression (it keeps the header base in A2 across the whole
+  `Start` routine). This one passed both the host-side round-trip test
+  *and* a real-hardware test of the depacker called directly (bypassing
+  `runtime.i` entirely) - it only failed in the full pipeline, and even
+  there just as silence (no sentinel within the timeout), indistinguishable
+  from a hang. Found by isolating each layer in turn (host encoder vs.
+  real upstream Shrinkler's own CLI output, byte-for-byte; the depacker
+  alone against known-good compressed bytes on real hardware, via a
+  disposable boot-block test bypassing this whole harness; then the
+  container header fields) until the one thing not yet isolated - what
+  `stub.s` itself handed the depacker - turned out to be the bug. See
+  `stubs/shrinkler/stub.s`'s own comment.
 
 ## Larger-scale end-to-end test (`run_large_e2e_test.sh`)
 
@@ -125,14 +140,14 @@ cross-hunk), and - unlike every other test here - diffs the *entire*
 serial transcript against a byte-exact expected file, not just a grep
 for one sentinel line. It also prints every backend's compression ratio
 on that program while it's at it
-(`store`/`inflate`/`zultra`/`zx0`/`salvador`), since having
+(`store`/`inflate`/`zultra`/`zx0`/`salvador`/`shrinkler`), since having
 a large enough test program was the prerequisite for any ratio numbers
 existing at all (see `PROJECT_PLAN.md` M1-M3).
 
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   EXECRAM_TEST_BACKEND=zx0 \
-  tests/uae/run_large_e2e_test.sh   # or store/inflate/zultra/salvador (script default: auto)
+  tests/uae/run_large_e2e_test.sh   # or store/inflate/zultra/salvador/shrinkler (script default: auto)
 ```
 
 The jump from a one-line sentinel to a multi-KB exact-match transcript

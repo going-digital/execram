@@ -70,7 +70,7 @@ PROGRAM_EXE="$WORK_DIR/program.exe"
 ORIGINAL_LEN="$(wc -c <"$PROGRAM_EXE" | tr -d ' ')"
 
 echo "== packing with every backend (ratio comparison) =="
-for b in store inflate zultra zx0 salvador; do
+for b in store inflate zultra zx0 salvador shrinkler; do
   packed="$WORK_DIR/packed_$b.exe"
   "$EXECRAM" pack "--backend=$b" "$PROGRAM_EXE" "$packed" 2>&1 | sed "s/^/  /"
 done
@@ -145,7 +145,7 @@ if [ "$found" -eq 1 ] && cmp -s "$SERIAL_LOG" "$EXPECTED_TXT"; then
   echo "PASS: all $EXPECTED_LEN bytes of the transcript matched exactly (--backend=$BACKEND)"
   echo ""
   echo "Compression ratios ($ORIGINAL_LEN byte original):"
-  for b in store inflate zultra zx0 salvador; do
+  for b in store inflate zultra zx0 salvador shrinkler; do
     packed="$WORK_DIR/packed_$b.exe"
     len="$(wc -c <"$packed" | tr -d ' ')"
     pct=$(awk "BEGIN { printf \"%.1f\", 100 * $len / $ORIGINAL_LEN }")
