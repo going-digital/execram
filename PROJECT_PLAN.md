@@ -482,6 +482,46 @@ by renaming only Salvador's copy via compiler `-D` flags (see
   or Kickstart ROM (host-side size/time measurement only), so unlike
   `tests/uae/*` this runs in `.github/workflows/ci.yml` too.
 
+**Post-v1.0: real executables, and a new boot mechanism to test them**
+The "rights-cleared real executables" half of M6's corpus item,
+deferred above, got resolved directly: `tests/corpus/hexagon.exe`, a
+real Amiga demo/game (Norwich Amiga Group) the author has rights to
+include, instrumented with a small serial-output snippet
+(`tests/corpus/exram_serial.h`) to make it observable headlessly. At
+220KB with 626 relocations and a 198KB Chip-RAM hunk, it's by far the
+largest, most realistic executable in any of execram's test suites -
+and it surfaced a real gap in the test harness itself, not in execram:
+`tests/uae/e2e/loader.s` (every other script's boot mechanism) is a
+bare-metal boot block with no AmigaDOS environment at all, which the
+synthetic corpus never needed (deliberately written to never call
+`OpenLibrary`) but a real program does. Chasing what looked like a
+packing bug (an extremely reproducible crash - identical faulting PC
+and opcode no matter what was varied: register state, stack size,
+chip RAM size, even independent rebuilds of the program with real
+source changes) led to disassembling the actual crash site and finding
+the true cause (a library call dispatched through a not-yet-open
+library base - a real bug in the program's own startup order, fixed on
+its own side) only after independently re-implementing `flatten.zig`'s
+own relocation algorithm in Python and confirming it byte-for-byte
+correct against real output - ruling out execram itself first. Even
+after that fix, the *same* symptom persisted under `loader.s`, which
+turned out to be the actual lesson: `loader.s` was never going to
+provide what a real program's `OpenLibrary` calls need, regardless of
+whether the program's own bug was fixed. `tests/uae/run_real_exe_test.sh`
+solves this properly rather than working around it: FS-UAE (like
+WinUAE) auto-wraps a single AmigaDOS executable file pointed at as a
+floppy drive into a minimal bootable disk with a real startup-sequence,
+so pointing `--floppy_drive_0` straight at execram's own packed output
+gives a genuine AmigaDOS launch with dramatically less machinery than
+`loader.s`'s own disk-image-building pipeline - no loader, no manual
+disk assembly. The same packed output that failed under `loader.s` ran
+correctly first try once boot moved to this mechanism, for five of the
+six backends immediately and the sixth (`shrinkler`) once its boot
+timeout was made realistic for real 68000 range-decoder timing on a
+file this large (see `tests/uae/README.md`'s own account - a second,
+smaller, genuinely distinct finding, not a bug either). All six now
+pass under this mechanism.
+
 **M7 — Docs & release** ✅ done
 - ~~README, format spec, per-backend algorithm notes, contribution
   guide~~ — README.md rewritten for a shipped tool rather than an

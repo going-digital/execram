@@ -3,15 +3,23 @@
 ## Building and testing
 
 See [README.md](README.md#building) for the toolchain requirements
-(Zig 0.16, two vasm builds, vlink) and basic commands. Two more test
-suites exist beyond `zig build test`, both local/dev-machine-only
-because they need a Kickstart ROM (copyrighted - see
-`docs/LICENSES.md` §9, never commit or fetch one in CI):
+(Zig 0.16, two vasm builds, vlink) and basic commands. More test suites
+exist beyond `zig build test`, all local/dev-machine-only because they
+need a Kickstart ROM (copyrighted - see `docs/LICENSES.md` §9, never
+commit or fetch one in CI):
 
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" tests/uae/run_large_e2e_test.sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" tests/uae/run_corpus_test.sh
+EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" tests/uae/run_real_exe_test.sh
 ```
+
+The first two boot a bare-metal boot block with no AmigaDOS environment
+at all - fine for programs written for this test suite (which never
+call `OpenLibrary`), not fine for a real one that does.
+`run_real_exe_test.sh` boots real executables
+(`tests/corpus/*.exe` + a paired `*.meta`) via a genuine AmigaDOS
+launch instead - see that script's own header if you're adding one.
 
 **If your change touches `stubs/`, `src/container.zig`,
 `src/flatten.zig`, or anything else in the actual pack/depack pipeline,

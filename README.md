@@ -75,6 +75,13 @@ programs didn't reach; `tests/ratio/track_ratios.py` tracks every
 backend's output size against a committed baseline and runs in CI
 (`.github/workflows/ci.yml`), no Kickstart ROM required.
 
+`tests/uae/run_real_exe_test.sh` boots real, third-party executables
+(not written for this test suite) the same way AmigaDOS actually
+would - a genuine launch via FS-UAE's own auto-boot of a single
+executable file, not the bare-metal boot block every other script here
+uses, since a real program's own `OpenLibrary` calls need a real
+environment to succeed in.
+
 `zultra` is an alternative, stronger host-side compressor for the same
 container/depacker `inflate` uses (both produce standard raw DEFLATE) —
 see [src/backends/zultra_vendor/README.md](src/backends/zultra_vendor/README.md).

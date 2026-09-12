@@ -51,6 +51,32 @@
       "size": 464
     }
   },
+  "corpus_hexagon": {
+    "inflate": {
+      "seconds": 0.05,
+      "size": 150844
+    },
+    "salvador": {
+      "seconds": 13.29,
+      "size": 156516
+    },
+    "shrinkler": {
+      "seconds": 14.91,
+      "size": 142044
+    },
+    "store": {
+      "seconds": 0.01,
+      "size": 216424
+    },
+    "zultra": {
+      "seconds": 0.33,
+      "size": 144216
+    },
+    "zx0": {
+      "seconds": 508.45,
+      "size": 156504
+    }
+  },
   "corpus_incompressible": {
     "inflate": {
       "seconds": 0.014,

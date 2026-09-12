@@ -1,0 +1,12 @@
+# Manifest for tests/uae/run_real_exe_test.sh - see that script's own
+# header for the format. hexagon.exe is a real Amiga program (not one
+# of gen_corpus.py's synthetic items), instrumented with
+# exram_serial.h (see that file) to make it observable headlessly:
+# SENTINEL is printed once, right after startup/library-open succeeds
+# and before the main effect loop; HEARTBEAT_CHECK=1 means the program
+# also loops forever printing '.' once per frame, so passing requires
+# not just the sentinel but confirmed continued output afterward -
+# distinguishing "booted and is still running" from "booted, then hung
+# or crashed right after the sentinel".
+SENTINEL="EXECRAM-HEXAGON-BOOT-OK"
+HEARTBEAT_CHECK=1

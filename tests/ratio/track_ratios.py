@@ -77,6 +77,14 @@ def build_test_programs(work_dir: str, vasm: str, vlink: str) -> dict[str, str]:
             name = entry[: -len(".s")]
             link(f"corpus_{name}", os.path.join(corpus_dir, entry))
 
+    # Real (not generator-produced) executables checked directly into
+    # tests/corpus/ - already-linked hunk files, so no vasm/vlink step
+    # needed, just reference them where they sit.
+    for entry in sorted(os.listdir(os.path.join(REPO_ROOT, "tests", "corpus"))):
+        if entry.endswith(".exe"):
+            name = entry[: -len(".exe")]
+            programs[f"corpus_{name}"] = os.path.join(REPO_ROOT, "tests", "corpus", entry)
+
     return programs
 
 

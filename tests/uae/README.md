@@ -195,3 +195,58 @@ BSS bytes at runtime and reports whether `AllocMem`'s `MEMF_CLEAR`
 really zeroed a nontrivial (64K) region.
 
 Requires the same things as `run_e2e_test.sh`/`run_large_e2e_test.sh`.
+
+## Real-executable test (`run_real_exe_test.sh`)
+
+Every other script here boots a bare-metal boot block
+(`tests/uae/e2e/loader.s`) that jumps straight into a packed program's
+stub with no AmigaDOS environment at all - no `Process`, no `LoadSeg`,
+no libraries opened. Fine for the synthetic corpus, deliberately
+written to never call `OpenLibrary`; not fine for a real program that
+does. `run_real_exe_test.sh` boots real executables
+(`tests/corpus/*.exe` with a paired `*.meta` - see that directory's own
+README and this script's own header) via a genuine AmigaDOS launch
+instead, and does it with dramatically less machinery than
+`loader.s`'s own disk-image-building pipeline: FS-UAE (like WinUAE)
+auto-wraps a single AmigaDOS executable file pointed at as a floppy
+drive into a minimal bootable disk with a real startup-sequence, so
+just pointing `--floppy_drive_0` straight at execram's own packed
+output is enough - no loader, no manual disk assembly.
+
+```sh
+EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
+  tests/uae/run_real_exe_test.sh
+```
+
+This exists because of a real, fully-chased-down false alarm:
+`tests/corpus/hexagon.exe` (a real Amiga demo, 220KB, 626 relocations,
+a 198KB Chip-RAM hunk) failed identically under `loader.s` no matter
+what was varied - register state, stack size, chip RAM size, even
+across independent rebuilds of the program itself with real source
+changes - always the exact same faulting PC and opcode. That
+consistency turned out to be the tell: a from-scratch Python
+reimplementation of `flatten.zig`'s own merge/relocation algorithm,
+checked directly against execram's real output, proved the relocation
+math byte-for-byte correct (626 sites, the full code+data region) well
+before this script existed, and disassembling the actual crash site
+identified the mechanism precisely (a library call dispatched through
+a not-yet-open library base, a real bug in the program's own startup
+order - nothing to do with execram). What `loader.s` could never
+explain was why `OpenLibrary` itself wasn't succeeding at all - and the
+answer was simply that a bare-metal boot block was never going to
+provide what a real program expects. Once boots moved to a genuine
+AmigaDOS launch, the exact same packed output (no execram change at
+all) ran correctly first try - for five of the six backends, on the
+first attempt. The sixth, `shrinkler`, is a second real, distinct
+finding worth recording separately: it initially came back
+`FAIL(no-sentinel)` at this script's original 30-second timeout, with
+nothing unusual in FS-UAE's own log (no exception, no crash - just
+quiet, ordinary execution right up to the point it got killed).
+Shrinkler's adaptive range decoder does meaningfully more per-bit work
+on real 68000 timing than the other backends' simpler decode loops
+(a `mulu.w` alone costs 38-70 cycles, executed multiple times per
+decoded bit), and this project had never asked it to decompress
+anything close to 221KB before - a longer, targeted retest confirmed
+it does complete and boot correctly, just slower, which is why
+`BOOT_TIMEOUT_CHECKS` here is considerably more generous than the
+other scripts' - see that constant's own comment.
