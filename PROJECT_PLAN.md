@@ -262,11 +262,8 @@ PROJECT_PLAN.md                 this file
   boot block the M1 test's simpler embed-everything approach used) and
   caught a real bug in it (`trackdisk.device`'s `CMD_READ` needs a
   sector-aligned length) - see `tests/uae/README.md`.
-- **Not yet done, flagged honestly:** ratio/speed benchmark numbers on
-  a real, substantial program - only tiny hand-written test programs
-  exist so far, where stub overhead (the inflate stub is ~1.1KB) swamps
-  any compression benefit. First real ratio data is still outstanding;
-  a good candidate task before or alongside M3.
+- ~~**Ratio/speed benchmark numbers**~~ ✅ done (after M3, see below) —
+  `tests/uae/run_large_e2e_test.sh` and `tests/uae/e2e_large/`.
 
 **M3 — ZX0 backend** ✅ done
 - ~~Vendor/port ZX0's optimal-parse compressor~~ — vendored unmodified
@@ -293,10 +290,37 @@ PROJECT_PLAN.md                 this file
   question back in M2).
 - ~~**Deliverable**~~ ✅ three working backends, each verified the same
   two ways as M1/M2 (byte-level + a real FS-UAE boot of the packed test
-  program under Kickstart 1.3). Benchmark comparison report on a real,
-  substantial program is still outstanding - same gap flagged at the
-  end of M2, now three milestones deep without one. Should not carry
-  into M4 unaddressed.
+  program under Kickstart 1.3).
+
+**Benchmark comparison report** ✅ done, closing the gap flagged at the
+end of M2 (and again above) - `tests/uae/e2e_large/gen_large_program.py`
+generates a genuinely larger test program (several KB of real prose,
+22 relocations - 20 self-hunk, 2 cross-hunk - instead of two or three),
+and `tests/uae/run_large_e2e_test.sh` packs it with every backend and
+boots whichever one you ask for, diffing the *entire* serial transcript
+against a byte-exact expected file rather than grepping for one
+sentinel line. Real numbers, all three backends confirmed passing that
+exact-match boot test on this program:
+
+| backend | packed size | % of original (5784B) |
+|---|---:|---:|
+| store   | 5480 B | 94.7% |
+| inflate | 3620 B | 62.6% |
+| zx0     | 2928 B | 50.6% |
+
+zx0 beats inflate by a wide margin here, consistent with its reputation
+in the demoscene/cruncher space generally. `store`'s "compression" is
+really just discarding the original hunk file's symbol table and
+per-hunk headers - a reminder that even the no-compression baseline
+isn't a no-op once hunks are merged.
+
+Building the larger test program surfaced one real bug - in the test
+harness, not the pack pipeline: `tests/uae/boot/pty_bridge.py`'s pty was
+left in default "cooked" tty mode, whose ONLCR translation turns every
+outgoing `0x0A` into `0x0D 0x0A`. Invisible to every earlier sentinel-
+substring check, but a real difference under this test's byte-exact
+comparison. Confirmed as a harness-only artifact (not a decompression or
+relocation defect) and fixed - see `tests/uae/README.md`.
 
 **M4 — Shrinkler-class backend** (~4–8+ weeks, highest effort, now lower-risk)
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)

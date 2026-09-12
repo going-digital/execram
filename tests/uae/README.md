@@ -104,3 +104,39 @@ with no header/payload/stub involved, couldn't have caught any of them):
   but `io_Error` came back non-zero). Fixed by rounding the read length
   up to the next sector - the handful of extra zero bytes that reads in
   are never examined by anything downstream.
+
+## Larger-scale end-to-end test (`run_large_e2e_test.sh`)
+
+`run_e2e_test.sh`'s program is deliberately tiny (a couple of
+relocations, one short sentinel line) - enough to prove the mechanism,
+but not enough to trust at real-world scale, or to get a meaningful
+compression ratio out of. `run_large_e2e_test.sh` runs the same
+mechanism against `e2e_large/gen_large_program.py`'s output instead:
+several KB of real prose and 22 relocations (20 self-hunk, 2
+cross-hunk), and - unlike every other test here - diffs the *entire*
+serial transcript against a byte-exact expected file, not just a grep
+for one sentinel line. It also prints every backend's compression ratio
+on that program while it's at it (`store`/`inflate`/`zx0`), since having
+a large enough test program was the prerequisite for any ratio numbers
+existing at all (see `PROJECT_PLAN.md` M1-M3).
+
+```sh
+EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
+  EXECRAM_TEST_BACKEND=zx0 \
+  tests/uae/run_large_e2e_test.sh   # or store/inflate (script default: auto)
+```
+
+The jump from a one-line sentinel to a multi-KB exact-match transcript
+immediately surfaced a real bug - in the test harness, not the pack
+pipeline: `pty_bridge.py`'s pty was left in the default "cooked" tty
+mode, whose ONLCR output translation turns every `0x0A` the 68k code
+sends into `0x0D 0x0A` on the way out. Invisible to a human eye, and to
+every earlier test here (they only grepped for a sentinel substring,
+tolerating the extra `0x0D` silently) - but a real difference once
+`cmp`-exact comparison was actually being done. Confirmed as a
+harness-only artifact, not a decompression or relocation defect, by
+stripping the `0x0D` bytes from the "failing" transcript and finding an
+exact match underneath. Fixed by putting the pty's slave side into raw
+mode (`termios`, clearing `ONLCR`/`OPOST`) in `pty_bridge.py`, which
+`run_boot_test.sh` and `run_e2e_test.sh` also benefit from even though
+their weaker sentinel-substring checks never depended on it.
