@@ -49,7 +49,39 @@ serial emulation in testing here. A fixed delay is fine for a one-shot
 sentinel with nothing else going on; a real depacker stub with actual
 timing constraints would need to revisit this.
 
-Later milestones extend this same mechanism to boot actual
-execram-packed executables (loaded from a small hard-drive-directory
-mount with a `startup-sequence`, once M1's hunk writer exists) instead of
-the bare sentinel boot block.
+## M1 end-to-end test (`run_e2e_test.sh`)
+
+Extends the same mechanism to boot an actual `execram`-packed program,
+not just the bare sentinel:
+
+```sh
+EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" tests/uae/run_e2e_test.sh
+```
+
+It builds `execram`, links `e2e/program.s` (a small program with both a
+cross-hunk and a self-hunk relocation) into a real executable, packs it
+with `execram pack` (`--backend=store`), extracts the inner
+stub+header+payload container (`e2e/extract_container.py`, reading the
+outer hunk's own declared length - not the AmigaDOS CLI/Workbench boot
+path, which real execram output normally goes through, but a much
+simpler way to exercise the packed program's *runtime stub* directly),
+wraps that in a boot-block header, and boots it the same way
+`run_boot_test.sh` does.
+
+The test program only prints its sentinel correctly if a pointer that
+went through both relocations ends up correct - this is a real
+functional check of decompress+allocate+relocate+jump, not just "did it
+not crash". It caught a real bug during development: `StubEnd` was
+originally defined inside `stubs/common/runtime.i`, which is `include`d
+*before* each backend's own `Depack` code - so it pointed at the start
+of `Depack` instead of the true end of the assembled stub. The bare
+sentinel test (which has no header/payload to locate) couldn't have
+caught that; only booting an actual packed program could.
+
+A second bug surfaced in the test's own tooling, not the pack pipeline:
+an earlier version of `extract_container.py` scanned for the "ExCr"
+magic bytes instead of reading the hunk's declared length, and found a
+coincidental match inside the stub's own `cmp.l #MAGIC,...` instruction
+- it still "passed" only because Python's slice clamping happened to
+land on the file's true end anyway. Fixed to read the length field
+directly, which is correct by construction rather than by coincidence.

@@ -204,9 +204,26 @@ PROJECT_PLAN.md                 this file
   against the same real fixture as `hunk.zig`, with hand-computed
   expected byte values, plus synthetic negative-path tests for
   out-of-range/misaligned relocations.
-- `store` backend (no compression) proves the full pipeline end-to-end
-- **Deliverable:** `execram pack --backend=store in.exe out.exe` boots
-  correctly under FS-UAE, byte-identical loaded image vs. the original
+- ~~`store` backend + host-side writer + `pack` CLI~~ ✅ done —
+  `src/backends/store.zig` (no compression, just concatenates code_data
+  ++ reloc_stream), `src/container.zig` (serializes the v0 header and
+  wraps it as a single-hunk AmigaDOS load file), `stubs/store/stub.s` +
+  `stubs/common/{runtime.i,header.i}` (the 68k runtime: header parsing,
+  AllocMem, depack, copy, reloc-fixup, jump - shared skeleton any future
+  backend's stub includes). `execram pack` is wired up and working.
+- ~~**Deliverable**~~ ✅ done and verified two ways:
+  1. Byte-level: packing a real fixture and hand-checking every header
+     field and every relocated value against independently computed
+     expected bytes (both matched exactly, first try, once the Zig side
+     was right).
+  2. **Real hardware/emulation**: `tests/uae/run_e2e_test.sh` builds
+     execram, packs a test program with both a cross-hunk and a
+     self-hunk relocation, and boots the packed program's stub under
+     FS-UAE against a real Kickstart ROM - it only prints its sentinel
+     correctly if decompress+allocate+relocate+jump all actually
+     worked. This caught a real bug (`StubEnd` pointing at the wrong
+     address - see `tests/uae/README.md`) that the byte-level check
+     alone couldn't have, since it never executed the stub's own code.
 
 **M2 — Inflate backend** (~2–3 weeks)
 - Host-side raw-DEFLATE encoder (vendor or Zig-native)

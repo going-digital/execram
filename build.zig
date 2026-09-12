@@ -7,10 +7,14 @@ const std = @import("std");
 const Stub = struct {
     name: []const u8,
     source: []const u8,
+    /// Passed to vasm as `-I<dir>` when the stub `include`s shared code
+    /// (stubs/common/) - see stubs/store/stub.s.
+    include_dir: ?[]const u8 = null,
 };
 
 const stubs = [_]Stub{
     .{ .name = "stub_example", .source = "stubs/example/hello.s" },
+    .{ .name = "stub_store", .source = "stubs/store/stub.s", .include_dir = "stubs/common" },
 };
 
 /// A real hunk executable built at test time (vasm assembles to a linkable
@@ -69,6 +73,9 @@ pub fn build(b: *std.Build) void {
             "-no-opt", // no branch/addressing-mode relaxation: keep stub timing predictable
             "-quiet",
         });
+        if (stub.include_dir) |dir| {
+            assemble.addArg(b.fmt("-I{s}", .{dir}));
+        }
         assemble.addFileArg(b.path(stub.source));
         assemble.addArg("-o");
         const bin = assemble.addOutputFileArg(b.fmt("{s}.bin", .{stub.name}));

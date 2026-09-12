@@ -1,32 +1,34 @@
 const std = @import("std");
 const Io = std.Io;
 
-test {
-    _ = @import("hunk.zig");
-    _ = @import("flatten.zig");
-}
+const hunk = @import("hunk.zig");
+const flatten = @import("flatten.zig");
+const container = @import("container.zig");
+const store = @import("backends/store.zig");
 
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
-/// `stub_example` is the assembled bytes of stubs/example/hello.s, embedded
-/// at build time by build.zig. Real backends replace this in later
-/// milestones (see PROJECT_PLAN.md).
+/// Real backends replace this in later milestones (see PROJECT_PLAN.md).
 const stub_example = @embedFile("stub_example");
+
+/// The "store" backend's depacker stub (stubs/store/stub.s), assembled
+/// and embedded at build time (build.zig).
+const stub_store = @embedFile("stub_store");
 
 const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack --backend=<store|inflate|zx0|shrinkler|auto> <in> <out>
+    \\  execram pack [--backend=store] <in> <out>
     \\  execram info <packed-exe>
     \\
-    \\Not yet implemented - see PROJECT_PLAN.md for the milestone plan.
+    \\Only --backend=store exists so far (M1); inflate/zx0/shrinkler
+    \\land in later milestones - see PROJECT_PLAN.md.
     \\
 ;
 
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
-
     const io = init.io;
 
     if (args.len < 2) {
@@ -36,12 +38,55 @@ pub fn main(init: std.process.Init) !void {
 
     const command = args[1];
     if (std.mem.eql(u8, command, "pack")) {
-        std.log.info("pack: not yet implemented (M1+)", .{});
+        cmdPack(io, arena, args[2..]) catch |err| {
+            std.log.err("pack failed: {s}", .{@errorName(err)});
+            return err;
+        };
     } else if (std.mem.eql(u8, command, "info")) {
-        std.log.info("info: not yet implemented (M1+)", .{});
+        std.log.info("info: not yet implemented (M5)", .{});
     } else {
         try printUsage(io);
     }
+}
+
+fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
+    var backend_name: []const u8 = "store";
+    var positional: std.ArrayList([]const u8) = .empty;
+    for (args) |arg| {
+        if (std.mem.startsWith(u8, arg, "--backend=")) {
+            backend_name = arg["--backend=".len..];
+        } else {
+            try positional.append(arena, arg);
+        }
+    }
+    if (positional.items.len != 2) {
+        std.log.err("usage: execram pack [--backend=store] <in> <out>", .{});
+        return error.InvalidArguments;
+    }
+    if (!std.mem.eql(u8, backend_name, "store")) {
+        std.log.err("backend '{s}' isn't implemented yet - only 'store' exists in M1", .{backend_name});
+        return error.UnsupportedBackend;
+    }
+
+    const in_path = positional.items[0];
+    const out_path = positional.items[1];
+
+    const cwd: Io.Dir = .cwd();
+    const input_bytes = try cwd.readFileAlloc(io, in_path, arena, .limited(256 * 1024 * 1024));
+
+    var file = try hunk.parse(arena, input_bytes);
+    defer file.deinit();
+
+    var image = try flatten.flatten(arena, file);
+    defer image.deinit();
+
+    const payload = try store.compress(arena, image);
+    const container_bytes = try container.buildContainer(arena, image, .store, stub_store, payload);
+    const exe_bytes = try container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
+
+    try cwd.writeFile(io, .{ .sub_path = out_path, .data = exe_bytes });
+
+    std.log.info("packed {s} -> {s} ({d} -> {d} bytes)", .{ in_path, out_path, input_bytes.len, exe_bytes.len });
 }
 
 fn printUsage(io: Io) !void {
@@ -55,4 +100,11 @@ fn printUsage(io: Io) !void {
 test "example stub assembled correctly" {
     // stubs/example/hello.s is: moveq #42,d0 ; rts -> 70 2a 4e 75
     try std.testing.expectEqualSlices(u8, &.{ 0x70, 0x2a, 0x4e, 0x75 }, stub_example);
+}
+
+test {
+    _ = hunk;
+    _ = flatten;
+    _ = container;
+    _ = store;
 }
