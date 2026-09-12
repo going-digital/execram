@@ -97,7 +97,7 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 |------:|---------|-----------|
 | 0     | store (no compression) | M1 |
 | 1     | inflate (DEFLATE) | M2 (also used by the `zultra` CLI backend - an alternative, stronger DEFLATE *encoder* producing the same format for the same depacker; there's no separate `zultra` entry here because the container/stub don't need one) |
-| 2     | zx0 | M3 |
+| 2     | zx0 | M3 (also used by the `salvador` CLI backend - an alternative, optimal-parse ZX0 *encoder* producing the same format for the same depacker; there's no separate `salvador` entry here for the same reason there's no separate `zultra` entry above) |
 | 3     | shrinkler-class | M4 |
 | 4-254 | reserved for future backends | |
 | 255   | invalid / never emitted | tooling sentinel |

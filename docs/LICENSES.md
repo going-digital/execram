@@ -221,7 +221,42 @@ needed):
 All four are permissive with no copyleft; fine to vendor directly,
 honoring each file's own notice per the details above.
 
-## 7. Decisions this audit changes vs. the original plan
+## 7. Salvador — `emmanuel-marty/salvador`
+
+Commit audited: `1662b625a8dcd6f3f7e3491c88840611776533f5`
+
+"A free, open-source compressor for the ZX0 format" - an alternative
+optimal-parse host-side compressor for the `zx0` backend's existing
+depacker, from the same author as `unzx0_68000` (§3). Confirmed to
+produce the same ZX0 v2 ("inverted") format by diffing salvador's own
+bundled copy of `asm/68000/unzx0_68000.S` directly against the one
+already vendored in `stubs/zx0/` and finding them byte-identical - not
+just assumed from format documentation - so no new depacker or
+backend_id is needed (`src/backends/salvador.zig`). Two licenses apply
+within the vendored subset (core library plus its own ZX0 decompressor,
+vendored to enable a real round-trip test; the reference CLI is not
+vendored, per `src/backends/salvador_vendor/README.md`):
+
+- **Most files:** zlib license (`Copyright (c) Emmanuel Marty`),
+  identical terms to `unzx0_68000` (§3) and Zultra's own files (§6).
+- **`src/matchfinder.c`:** CC0 1.0 Universal (public domain), same terms
+  as Zultra's `src/matchfinder.c` (§6) - verified against
+  `LICENSE.cc0.md`.
+- **`src/libdivsufsort/`:** MIT license, verified against
+  `libdivsufsort/LICENSE`. Same upstream project as Zultra's own
+  `libdivsufsort/` (§6), but a **different fork** - diffed directly and
+  confirmed not byte-identical (this one keeps plain `malloc`/`free`,
+  Zultra's takes a `zalloc`/`zfree` allocator pair) - so vendored and
+  audited separately rather than assumed identical. Both forks define
+  the same 12 global C symbols, which collide at link time when both
+  are vendored into one binary; resolved in `build.zig` by renaming
+  only Salvador's copy via compiler `-D` flags (no source changes, no
+  license implications - the code itself is untouched).
+
+All three are permissive with no copyleft; fine to vendor directly,
+honoring each file's own notice per the details above.
+
+## 8. Decisions this audit changes vs. the original plan
 
 The plan (`PROJECT_PLAN.md`) originally assumed Shrinkler was GPL and
 required M4 (the Shrinkler-class backend) to be built purely from a
@@ -244,7 +279,7 @@ reuse. That assumption was wrong:
 `PROJECT_PLAN.md` §3 and §7 (M4) should be updated to reflect this — see
 the accompanying edit.
 
-## 8. Kickstart ROMs (test dependency, not a project dependency)
+## 9. Kickstart ROMs (test dependency, not a project dependency)
 
 The FS-UAE boot tests under `tests/uae/` need a real Kickstart ROM to run
 against. Kickstart ROMs are copyrighted (originally Commodore-Amiga, now
@@ -254,7 +289,7 @@ supplies their own legally-obtained ROM via the `EXECRAM_KICKSTART`
 environment variable (see `tests/uae/README.md`); this is why those tests
 are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 
-## 9. Summary table
+## 10. Summary table
 
 | Component | License | Vendor/adapt OK? | Obligations |
 |---|---|---|---|
@@ -264,6 +299,13 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | ZX0 — 68k depacker (in ZX0 repo) | zlib | Yes | Retain notice |
 | unzx0_68000 | zlib | Yes | Retain notice; don't misrepresent origin |
 | Keir Fraser `inflate.S` / `bootblock.S` | Unlicense (public domain) | Yes | None |
+| Zultra — general codebase | zlib | Yes | Retain notice |
+| Zultra — `src/matchfinder.c` | CC0 1.0 | Yes | None |
+| Zultra — `src/huffman/huffutils.c` | Apache 2.0 | Yes | Retain notices; mark changed files |
+| Zultra — `src/libdivsufsort/` | MIT | Yes | Retain notice |
+| Salvador — general codebase | zlib | Yes | Retain notice |
+| Salvador — `src/matchfinder.c` | CC0 1.0 | Yes | None |
+| Salvador — `src/libdivsufsort/` (different fork than Zultra's) | MIT | Yes | Retain notice |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 

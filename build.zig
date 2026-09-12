@@ -110,6 +110,57 @@ pub fn build(b: *std.Build) void {
             },
             .flags = &.{"-std=c99"},
         });
+
+        // salvador_vendor's own files use a bare `#include
+        // "divsufsort.h"` (unlike zultra_vendor's, which reference it
+        // via a path relative to zultra_vendor's own root) - needs an
+        // explicit include path straight to libdivsufsort/include, not
+        // just the vendor root, matching upstream's own Makefile flags
+        // (see src/backends/salvador_vendor/README.md).
+        mod.addIncludePath(b.path("src/backends/salvador_vendor"));
+        mod.addIncludePath(b.path("src/backends/salvador_vendor/libdivsufsort/include"));
+        mod.addCSourceFiles(.{
+            .root = b.path("src/backends/salvador_vendor"),
+            .files = &.{
+                "matchfinder.c",
+                "shrink.c",
+                "expand.c",
+                "salvador_shim.c",
+                "libdivsufsort/lib/divsufsort.c",
+                "libdivsufsort/lib/divsufsort_utils.c",
+                "libdivsufsort/lib/sssort.c",
+                "libdivsufsort/lib/trsort.c",
+            },
+            // zultra_vendor above vendors a *different* fork of the same
+            // upstream libdivsufsort (see
+            // src/backends/salvador_vendor/README.md) - both define the
+            // same 12 global, non-static symbols (confirmed by direct
+            // inspection of both trees, not just the first 5 the linker
+            // happened to report), so linking both unmodified into one
+            // binary is a hard duplicate-symbol collision. Renamed only
+            // salvador's copy via -D, the same preprocessor-rename idiom
+            // divsufsort_private.h already uses itself for a 64-bit
+            // variant (`#define sssort sssort64`) - no source edits
+            // needed, and salvador's own internal callers/declarations
+            // (divsufsort_private.h's extern prototypes, matchfinder.c's
+            // calls) pick up the rename automatically since they use the
+            // same macro-expanded names.
+            .flags = &.{
+                "-std=c99",
+                "-Ddivsufsort_init=salvador_divsufsort_init",
+                "-Ddivsufsort_destroy=salvador_divsufsort_destroy",
+                "-Ddivsufsort_build_array=salvador_divsufsort_build_array",
+                "-Ddivbwt=salvador_divbwt",
+                "-Ddivsufsort_version=salvador_divsufsort_version",
+                "-Dbw_transform=salvador_bw_transform",
+                "-Dinverse_bw_transform=salvador_inverse_bw_transform",
+                "-Dsufcheck=salvador_sufcheck",
+                "-Dsa_search=salvador_sa_search",
+                "-Dsa_simplesearch=salvador_sa_simplesearch",
+                "-Dsssort=salvador_sssort",
+                "-Dtrsort=salvador_trsort",
+            },
+        });
     }
 
     for (stubs) |stub| {

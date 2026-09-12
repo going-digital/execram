@@ -57,7 +57,7 @@ not just the bare sentinel:
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   EXECRAM_TEST_BACKEND=inflate \
-  tests/uae/run_e2e_test.sh   # or store/zultra/zx0 (script default: store)
+  tests/uae/run_e2e_test.sh   # or store/zultra/zx0/salvador (script default: store)
 ```
 
 The inflate and zultra backends also need `EXECRAM_VASM_STD` (a
@@ -65,7 +65,12 @@ The inflate and zultra backends also need `EXECRAM_VASM_STD` (a
 `PATH` under that name already, and `EXECRAM_VLINK` if `vlink` isn't on
 `PATH`. (`zultra` uses `inflate`'s exact same stub - see
 `src/backends/zultra_vendor/README.md` - so it needs `vasmm68k_std` for
-the same reason `inflate` does, not a reason of its own.)
+the same reason `inflate` does, not a reason of its own. Likewise
+`salvador` uses `zx0`'s stub - see
+`src/backends/salvador_vendor/README.md` - so it has no `vasmm68k_std`
+need of its own either; `EXECRAM_VASM_STD` is needed regardless of
+which backend is under test, since `zig build` always assembles every
+stub, `stub_inflate` included.)
 
 It builds `execram`, links `e2e/program.s` (a small program with both a
 cross-hunk and a self-hunk relocation) into a real executable, packs it
@@ -119,14 +124,15 @@ several KB of real prose and 22 relocations (20 self-hunk, 2
 cross-hunk), and - unlike every other test here - diffs the *entire*
 serial transcript against a byte-exact expected file, not just a grep
 for one sentinel line. It also prints every backend's compression ratio
-on that program while it's at it (`store`/`inflate`/`zx0`), since having
+on that program while it's at it
+(`store`/`inflate`/`zultra`/`zx0`/`salvador`), since having
 a large enough test program was the prerequisite for any ratio numbers
 existing at all (see `PROJECT_PLAN.md` M1-M3).
 
 ```sh
 EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   EXECRAM_TEST_BACKEND=zx0 \
-  tests/uae/run_large_e2e_test.sh   # or store/inflate/zultra (script default: auto)
+  tests/uae/run_large_e2e_test.sh   # or store/inflate/zultra/salvador (script default: auto)
 ```
 
 The jump from a one-line sentinel to a multi-KB exact-match transcript

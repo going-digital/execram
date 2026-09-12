@@ -342,6 +342,37 @@ decompresses Zultra's output - exactly the compatibility claim this
 integration rested on). See `src/backends/zultra_vendor/README.md` and
 `docs/LICENSES.md` §6.
 
+**Salvador — an alternative "zx0" compressor** ✅ done (unplanned
+addition, between M3 and M4) - vendored
+[emmanuel-marty/salvador](https://github.com/emmanuel-marty/salvador),
+"a free, open-source compressor for the ZX0 format," from the same
+author as `unzx0_68000`. Because it produces the same ZX0 v2
+("inverted") format - confirmed directly by diffing salvador's own
+bundled 68k depacker against `stubs/zx0/unzx0_68000.s` and finding them
+byte-identical, not just assumed - it needed **no new depacker stub or
+backend_id at all**: `--backend=salvador` reuses `zx0`'s exact stub and
+container, just with a different (also optimal-parse) host-side
+compressor. On the large test program (`tests/uae/e2e_large/`): 2928
+bytes, identical to plain `zx0`'s 2928 (50.6% of the 5784-byte
+original) - both are optimal-parse ZX0 compressors, so matching output
+on this input is the expected result, not a bug. Verified the same two
+ways as every other backend: byte-level (a real compress-then-decompress
+round-trip through salvador's own vendored decompressor in
+`src/backends/salvador.zig`'s test - stronger rigor than the original
+zx0 backend's test had, since no host-side ZX0 decoder existed in this
+project yet at that point) and real hardware (both
+`tests/uae/run_e2e_test.sh` and the byte-exact `run_large_e2e_test.sh`
+pass with `EXECRAM_TEST_BACKEND=salvador`, confirming the *existing,
+unmodified* zx0 stub correctly decompresses Salvador's output).
+Vendoring it also surfaced a genuine build-system issue: it bundles its
+own fork of the MIT-licensed `libdivsufsort` suffix-array library,
+independently forked from the *different* copy already vendored inside
+`zultra_vendor/` - both define the same 12 global C symbols, which
+collided at link time once both were compiled into one binary; fixed
+by renaming only Salvador's copy via compiler `-D` flags (see
+`build.zig`), no source edits needed. See
+`src/backends/salvador_vendor/README.md` and `docs/LICENSES.md` §7.
+
 **M4 — Shrinkler-class backend** (~4–8+ weeks, highest effort, now lower-risk)
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
   is public-domain-equivalent and the rest of its codebase is permissive
