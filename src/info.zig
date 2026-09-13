@@ -35,7 +35,7 @@ const MAGIC: u32 = 0x45784372; // "ExCr"
 const HEADER_SIZE: usize = 32;
 
 pub const InfoError = error{
-    NotASingleCodeHunkFile,
+    NotATwoHunkCodeFile,
     UnrecognizedStub,
     TruncatedHeader,
     BadMagic,
@@ -136,10 +136,14 @@ pub fn printInfo(
     var file = try hunk.parse(allocator, exe_bytes);
     defer file.deinit();
 
-    if (file.hunks.len != 1 or file.hunks[0].kind != .code) {
-        return error.NotASingleCodeHunkFile;
+    // docs/format-spec.md §2 / docs/memory-lifecycle.md: hunk 0 is the
+    // trampoline (declared at the full resident size, tiny real body -
+    // nothing `info` needs to read there), hunk 1 holds the actual
+    // stub+header+payload container this function reports on.
+    if (file.hunks.len != 2 or file.hunks[0].kind != .code or file.hunks[1].kind != .code) {
+        return error.NotATwoHunkCodeFile;
     }
-    const container_data = file.hunks[0].data;
+    const container_data = file.hunks[1].data;
     const header = try locateHeader(container_data, known_stubs);
 
     const mem_chip = header.memChip();
@@ -198,7 +202,8 @@ test "printInfo reports a real container's fields" {
     const payload = "COMPRESSEDPAYLOAD!!"; // 19 bytes, arbitrary
     const container_bytes = try container.buildContainer(allocator, image, .zx0, stub, payload, false);
     defer allocator.free(container_bytes);
-    const exe_bytes = try container.writeHunkExecutable(allocator, container_bytes, image.mem_chip);
+    const resident_size = @as(u32, @intCast(image.code_data.len)) + image.bss_size;
+    const exe_bytes = try container.writeHunkExecutable(allocator, "FAKETRAMPOLINE!!", container_bytes, resident_size, image.mem_chip);
     defer allocator.free(exe_bytes);
 
     const known_stubs = [_]KnownStub{.{ .stub_name = "fake", .bytes = stub }};
@@ -221,7 +226,7 @@ test "printInfo reports a real container's fields" {
 
 test "printInfo rejects a file with no recognized stub" {
     const allocator = std.testing.allocator;
-    const exe_bytes = try container.writeHunkExecutable(allocator, "not a real container at all", false);
+    const exe_bytes = try container.writeHunkExecutable(allocator, "FAKETRAMPOLINE!!", "not a real container at all", 32, false);
     defer allocator.free(exe_bytes);
 
     const known_stubs = [_]KnownStub{.{ .stub_name = "fake", .bytes = "FAKESTUB" }};

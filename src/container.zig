@@ -72,13 +72,35 @@ const HUNK_END: u32 = 0x3F2;
 const HUNK_HEADER: u32 = 0x3F3;
 const MEMF_CHIP_BIT: u32 = 1 << 30;
 
-/// Wraps `container` (buildContainer's output) as a single-hunk AmigaDOS
-/// load file (docs/format-spec.md §2): HUNK_HEADER, one HUNK_CODE hunk
-/// holding `container` padded to a longword boundary, HUNK_END. No
-/// HUNK_RELOC32 - the stub is position-independent (PC-relative only).
-pub fn writeHunkExecutable(allocator: std.mem.Allocator, container: []const u8, mem_chip: bool) ![]u8 {
-    const padded_len = std.mem.alignForward(usize, container.len, 4);
-    const pad = padded_len - container.len;
+/// Wraps `container` (buildContainer's output) and `trampoline_bytes`
+/// (stubs/common/trampoline.s, assembled) as a *two*-hunk AmigaDOS load
+/// file (docs/format-spec.md §2, docs/memory-lifecycle.md): hunk 0 is
+/// declared at `resident_size` (the full decompressed image AmigaDOS's
+/// LoadSeg allocates up front - `code_data_size + bss_size`, already a
+/// multiple of 4) but its only real on-disk content is the tiny
+/// trampoline; hunk 1 holds `container` (stub-minus-trampoline ++
+/// header ++ compressed payload) as before, and is freed by the stub
+/// itself once decompression finishes (see stubs/common/runtime.i's own
+/// comment on the ABI this depends on). `mem_chip` applies only to hunk
+/// 0 - hunk 1 is always plain `MEMF_ANY`, since it's scratch space for
+/// the duration of decompression, not something worth taking out of the
+/// scarcer Chip RAM pool even when the final resident image needs to be
+/// there. No HUNK_RELOC32 anywhere - both hunks are position-independent
+/// (PC-relative only).
+pub fn writeHunkExecutable(
+    allocator: std.mem.Allocator,
+    trampoline_bytes: []const u8,
+    container: []const u8,
+    resident_size: u32,
+    mem_chip: bool,
+) ![]u8 {
+    std.debug.assert(resident_size % 4 == 0);
+    std.debug.assert(resident_size >= trampoline_bytes.len);
+
+    const hunk1_padded_len = std.mem.alignForward(usize, container.len, 4);
+    const hunk1_pad = hunk1_padded_len - container.len;
+    const trampoline_padded_len = std.mem.alignForward(usize, trampoline_bytes.len, 4);
+    const trampoline_pad = trampoline_padded_len - trampoline_bytes.len;
 
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
@@ -93,16 +115,39 @@ pub fn writeHunkExecutable(allocator: std.mem.Allocator, container: []const u8, 
 
     try w32(&out, allocator, &buf4, HUNK_HEADER);
     try w32(&out, allocator, &buf4, 0); // resident library name list: empty
-    try w32(&out, allocator, &buf4, 1); // table_size: one hunk
+    try w32(&out, allocator, &buf4, 2); // table_size: two hunks
     try w32(&out, allocator, &buf4, 0); // first_hunk
-    try w32(&out, allocator, &buf4, 0); // last_hunk
-    const size_longs: u32 = @intCast(padded_len / 4);
-    try w32(&out, allocator, &buf4, if (mem_chip) size_longs | MEMF_CHIP_BIT else size_longs);
+    try w32(&out, allocator, &buf4, 1); // last_hunk
+    const hunk0_size_longs: u32 = resident_size / 4;
+    try w32(&out, allocator, &buf4, if (mem_chip) hunk0_size_longs | MEMF_CHIP_BIT else hunk0_size_longs);
+    const hunk1_size_longs: u32 = @intCast(hunk1_padded_len / 4);
+    try w32(&out, allocator, &buf4, hunk1_size_longs);
 
+    // Hunk 0: declared at the full resident size, real body = just the
+    // trampoline (deliberately smaller - confirmed safe under real
+    // FS-UAE across Kickstart v1.3/v2.05/v3.1, see the commit that
+    // introduced this design). AmigaDOS zero-fills nothing beyond the
+    // real body for a CODE hunk, but nothing here depends on that -
+    // stubs/common/runtime.i's own BSS-reclear step makes no assumption
+    // about prior memory state.
     try w32(&out, allocator, &buf4, HUNK_CODE);
-    try w32(&out, allocator, &buf4, size_longs);
+    try w32(&out, allocator, &buf4, @intCast(trampoline_padded_len / 4));
+    try out.appendSlice(allocator, trampoline_bytes);
+    try out.appendNTimes(allocator, 0, trampoline_pad);
+    // Each hunk in a multi-hunk file is terminated by its own HUNK_END
+    // (no relocs/symbols/debug follow either body here) - the original
+    // single-hunk format only ever needed one, serving double duty as
+    // both "end of that hunk's trailer" and "end of file"; two hunks
+    // need one each.
+    try w32(&out, allocator, &buf4, HUNK_END);
+
+    // Hunk 1: today's existing container content, unchanged - just the
+    // second hunk now instead of the first, and freed by its own code
+    // once decompression finishes rather than kept resident forever.
+    try w32(&out, allocator, &buf4, HUNK_CODE);
+    try w32(&out, allocator, &buf4, hunk1_size_longs);
     try out.appendSlice(allocator, container);
-    try out.appendNTimes(allocator, 0, pad);
+    try out.appendNTimes(allocator, 0, hunk1_pad);
 
     try w32(&out, allocator, &buf4, HUNK_END);
 
@@ -112,29 +157,46 @@ pub fn writeHunkExecutable(allocator: std.mem.Allocator, container: []const u8, 
 const hunk = @import("hunk.zig");
 
 test "writeHunkExecutable round-trips through hunk.zig" {
+    const trampoline = "tramp!!"; // 7 bytes, arbitrary - real content is stubs/common/trampoline.s
     const container = "hello, this is a fake stub+header+payload blob";
-    const exe_bytes = try writeHunkExecutable(std.testing.allocator, container, false);
+    const exe_bytes = try writeHunkExecutable(std.testing.allocator, trampoline, container, 64, false);
     defer std.testing.allocator.free(exe_bytes);
 
     var file = try hunk.parse(std.testing.allocator, exe_bytes);
     defer file.deinit();
 
-    try std.testing.expectEqual(@as(usize, 1), file.hunks.len);
+    try std.testing.expectEqual(@as(usize, 2), file.hunks.len);
     try std.testing.expectEqual(hunk.HunkKind.code, file.hunks[0].kind);
     try std.testing.expectEqual(hunk.MemAttr.any, file.hunks[0].mem_attr);
+    // Hunk 0's real on-disk body is just the trampoline, padded to a
+    // longword - not the full declared (resident, 64-byte) table size;
+    // the rest is uninitialized until the stub's own Depack call fills
+    // it at runtime (hunk.zig's `size_bytes` reports this hunk's own
+    // restated body size, not the table's - see that field's own doc).
+    try std.testing.expectEqual(@as(u32, 8), file.hunks[0].size_bytes);
+    try std.testing.expectEqualSlices(u8, trampoline, file.hunks[0].data[0..trampoline.len]);
+
+    try std.testing.expectEqual(hunk.HunkKind.code, file.hunks[1].kind);
+    try std.testing.expectEqual(hunk.MemAttr.any, file.hunks[1].mem_attr);
     // The hunk is padded to a longword boundary; our container's exact
     // bytes must still appear verbatim as its prefix.
-    try std.testing.expectEqualSlices(u8, container, file.hunks[0].data[0..container.len]);
+    try std.testing.expectEqualSlices(u8, container, file.hunks[1].data[0..container.len]);
 }
 
-test "writeHunkExecutable sets the Chip RAM memory flag" {
-    const exe_bytes = try writeHunkExecutable(std.testing.allocator, "x", true);
+test "writeHunkExecutable sets the Chip RAM memory flag on hunk 0 only" {
+    const exe_bytes = try writeHunkExecutable(std.testing.allocator, "t", "x", 4, true);
     defer std.testing.allocator.free(exe_bytes);
 
     var file = try hunk.parse(std.testing.allocator, exe_bytes);
     defer file.deinit();
 
     try std.testing.expectEqual(hunk.MemAttr.chip, file.hunks[0].mem_attr);
+    // Hunk 1 is scratch space for the duration of decompression only -
+    // always plain MEMF_ANY, even when the resident image needs Chip RAM
+    // (docs/memory-lifecycle.md's "Chip RAM: both buffers share one
+    // decision" - this redesign is what actually fixes that, for the
+    // scratch hunk's own share of it).
+    try std.testing.expectEqual(hunk.MemAttr.any, file.hunks[1].mem_attr);
 }
 
 test "buildContainer serializes the header per docs/format-spec.md" {

@@ -38,6 +38,12 @@ fn addIncludedFileInputs(b: *std.Build, run: *std.Build.Step.Run, paths: []const
 
 const stubs = [_]Stub{
     .{ .name = "stub_example", .source = "stubs/example/hello.s" },
+    // Hunk 0's own body for every backend alike (docs/memory-lifecycle.md's
+    // "new default" - src/container.zig's writeHunkExecutable). No
+    // `include`s of its own, so no include_dir/extra_includes needed.
+    // The generated .lst listing goes unused (nothing needs
+    // stub_trampoline's own Depack offset), harmless.
+    .{ .name = "stub_trampoline", .source = "stubs/common/trampoline.s" },
     .{
         .name = "stub_store",
         .source = "stubs/store/stub.s",

@@ -1,27 +1,18 @@
-; Shared v0 runtime skeleton (docs/format-spec.md §8), included by each
-; backend's stub.s right before that backend defines `Depack`. Position-
-; independent (PC-relative only) - no HUNK_RELOC32 needed for the
-; assembled stub itself.
-;
-; The includer must define:
-;
-;   Depack:
-;     In:  A0 = compressed payload pointer
-;          A1 = output buffer pointer (must write exactly
-;               code_data_size + reloc_stream_size bytes here)
-;          D0 = compressed_size (informational; a self-terminating
-;               backend format may ignore it)
-;     Preserves D2-D7/A2-A6 - matches ShrinklerDecompress.S's own
-;     convention (docs/LICENSES.md §1b), so a Shrinkler-derived backend
-;     can plug into this skeleton with minimal glue. Free to clobber
-;     D0/D1/A0/A1.
+; std-syntax mirror of ../common/runtime.i - see that file's own header
+; comment for the full design (the two-hunk runtime, the trampoline
+; handoff, and the ABI this depends on for finding/freeing this hunk's
+; own memory). Kept in sync by hand, like ../common/header.i's own std
+; copy (header_std.i) - see that file's own comment for why there's no
+; good way to share one file across vasm's mot and std syntax modules.
 
 	.include	"header_std.i"
 
+; EXEC_AllocMem is no longer used by Start: itself (see below) - kept
+; here since it's still a real Exec LVO a backend's own Depack may need
+; for its own internal scratch space (this stub's own inflate decode
+; window - see stub.s's own Depack), same as EXEC_FreeMem.
 .equ EXEC_AllocMem,-198
 .equ EXEC_FreeMem,-210
-.equ MEMF_CHIP,2
-.equ MEMF_CLEAR,0x10000
 
 ; FLAG_FLASH support (docs/format-spec.md §5) - see ../common/runtime.i's
 ; own comment (kept in sync by hand, like everything else in this file).
@@ -38,29 +29,10 @@ Start:
 
 	move.l	4.w,a6			; ExecBase
 
-	; final = AllocMem(code_data_size + max(bss_size, reloc_stream_size), MEMF_CLEAR [| MEMF_CHIP])
-	; One allocation, not two - see ../common/runtime.i's own comment
-	; for the full rationale (a real 512KB-Amiga out-of-memory finding,
-	; not just a tidiness improvement). Depack decompresses DIRECTLY
-	; into this buffer; no separate scratch, no CopyCodeData, no FreeMem.
-	; Its BSS tail is explicitly re-cleared below, right before jumping
-	; in - see the comment there.
-	move.l	HDR_CODE_DATA_SIZE(a2),d0
-	move.l	HDR_BSS_SIZE(a2),d1
-	cmp.l	HDR_RELOC_STREAM_SIZE(a2),d1
-	bcc.s	.tailok			; bss_size >= reloc_stream_size already
-	move.l	HDR_RELOC_STREAM_SIZE(a2),d1
-.tailok:
-	add.l	d1,d0
-	move.l	#MEMF_CLEAR,d1
-	btst	#0,HDR_FLAGS(a2)	; FLAG_MEM_CHIP
-	beq.s	.notchip
-	or.l	#MEMF_CHIP,d1
-.notchip:
-	jsr	EXEC_AllocMem(a6)
-	move.l	d0,a4			; a4 = final base (Depack's output too)
-	tst.l	d0
-	beq.w	Fail
+	; No allocation at all: A4 already holds hunk 0's own base (Depack's
+	; output target), handed in by ../common/trampoline.s. See that
+	; file's own and ../common/runtime.i's own comments for the full
+	; design and the confirmed ABI this depends on.
 
 	; Depack(compressed payload -> final)
 	moveq	#0,d1
@@ -84,16 +56,9 @@ Start:
 	bsr.w	RelocFixup
 .norelocs:
 
-	; Clear BSS: this region of the buffer still holds whatever Depack/
-	; RelocFixup last left there (the just-consumed reloc stream, when
-	; there was one - shorter than bss_size whenever reloc_stream_size
-	; < bss_size, so its tail is stale AllocMem-time zero but the head
-	; is leftover reloc-stream bytes either way). The program's BSS must
-	; be all-zero at entry, so clear it again here rather than relying
-	; on AllocMem's own MEMF_CLEAR, which only zeroed this space
-	; *before* Depack/RelocFixup wrote all over it. bss_size is always a
-	; multiple of 4 - hunk sizes are stored in longwords, same guarantee
-	; code_data_size has (see stubs/store/stub.s's own comment).
+	; Clear BSS - identical rationale to ../common/runtime.i's own (this
+	; step makes no assumption about what was here before it runs, now
+	; that there's no AllocMem MEMF_CLEAR at all).
 	move.l	HDR_CODE_DATA_SIZE(a2),d0
 	lea	0(a4,d0.l),a0		; a0 = start of BSS within final
 	move.l	HDR_BSS_SIZE(a2),d0
@@ -105,12 +70,22 @@ Start:
 	bne.s	.bssclear
 .bssdone:
 
+	; Detach hunk 1 (this hunk) from hunk 0's own chain-pointer field,
+	; free it, then jump into the now-fully-decompressed, fully-relocated
+	; program - see ../common/runtime.i's own comment for the full
+	; rationale (this is the whole point of the two-hunk redesign).
+	clr.l	-4(a4)			; hunk 0's own chain pointer no longer references this hunk
+
+	lea	Start(pc),a3		; a3 = this hunk's own base (its data start)
+	move.l	-8(a3),d0		; this hunk's own total AllocMem'd size (already includes the 8-byte overhead FreeMem expects)
+	lea	-8(a3),a1		; a1 = this hunk's own block base
+	jsr	EXEC_FreeMem(a6)
+
 	jmp	(a4)
 
 Fail:
 	; docs/format-spec.md §8: no recovery behavior defined for v0 (only
-	; one major version exists so far, and there's nothing sensible to
-	; do about a failed AllocMem here) - hang rather than run off into
+	; one major version exists so far) - hang rather than run off into
 	; garbage.
 	bra.s	Fail
 
@@ -149,9 +124,4 @@ RelocFixup:
 .relocdone:
 	rts
 
-; NOTE: StubEnd is NOT defined here. runtime.i is `include`d before each
-; backend's own Depack code, so a label placed here would land at the
-; start of Depack, not at the true end of the assembled stub - that was
-; a real bug, caught by tests/uae/e2e's boot test (see that script's
-; history/commit message). Each backend's stub.s must define
-; `even` / `StubEnd:` itself, after its own Depack routine.
+; NOTE: StubEnd is NOT defined here, same reason as ../common/runtime.i.

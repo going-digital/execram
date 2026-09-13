@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # M1/M2 FS-UAE end-to-end test: builds execram, packs a real test
-# program with it, and boots the packed program's inner
-# stub+header+payload container directly - skipping the outer AmigaDOS
-# hunk-file wrapper (see e2e/extract_container.py) - via a disk-reading
-# boot loader (e2e/loader.s; run_boot_test.sh's simpler bare-metal
-# sentinel embeds everything directly in the 1024-byte boot block
-# instead, which no longer fits once a real depacker stub is involved).
+# program with it, and boots the packed program via a disk-reading boot
+# loader (e2e/loader.s) that parses the real two-hunk AmigaDOS load file
+# execram produces (docs/format-spec.md §2, docs/memory-lifecycle.md)
+# and rebuilds the same in-memory layout a genuine LoadSeg would -
+# run_boot_test.sh's simpler bare-metal sentinel embeds everything
+# directly in the 1024-byte boot block instead, which no longer fits
+# once a real depacker stub is involved.
 # The test program (e2e/program.s) only prints its sentinel correctly if
 # a pointer that went through a real cross-hunk AND a real self-hunk
 # relocation both ended up correct - this checks the packed program's
@@ -72,7 +73,7 @@ echo "== packing with execram (--backend=$BACKEND) =="
 PACKED_EXE="$WORK_DIR/packed.exe"
 "$EXECRAM" pack "--backend=$BACKEND" "$PROGRAM_EXE" "$PACKED_EXE"
 
-echo "== extracting the inner container =="
+echo "== validating the packed file's shape =="
 CONTAINER_BIN="$WORK_DIR/container.bin"
 python3 "$SCRIPT_DIR/e2e/extract_container.py" "$PACKED_EXE" "$CONTAINER_BIN"
 CONTAINER_LEN="$(wc -c <"$CONTAINER_BIN" | tr -d ' ')"

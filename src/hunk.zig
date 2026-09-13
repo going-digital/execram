@@ -65,8 +65,12 @@ pub const Hunk = struct {
     data: []const u8,
     /// For BSS, the zero-fill length (data.len is 0). For code/data,
     /// always equal to data.len - kept as a separate field so all three
-    /// kinds read the same way, matching the hunk-size table's own
-    /// per-hunk size value.
+    /// kinds read the same way. This is the hunk's own *restated* size
+    /// (right after its own HUNK_CODE/DATA/BSS marker in the file), not
+    /// necessarily the master hunk-size table's declared/allocated size
+    /// for it - the two may legally differ (this one no bigger than the
+    /// table's), which `parse` permits but does not expose further; no
+    /// current caller needs the table's own value.
     size_bytes: u32,
     /// Owned; freed by HunkFile.deinit.
     relocs: []Reloc,
@@ -172,7 +176,19 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) ParseError!HunkFil
 
         const length_longs = try c.u32be();
         const size_bytes = length_longs * 4;
-        if (size_bytes != planned_sizes[i]) return error.MalformedHunk;
+        // A hunk's own restated size (here) may be smaller than the
+        // master table's declared/allocated size (`planned_sizes[i]`,
+        // checked above) - LoadSeg allocates the table's amount but only
+        // reads this many real bytes from the file into the start of
+        // it, leaving the rest uninitialized. Confirmed real, legal
+        // AmigaDOS behavior (not just tolerated, actively relied on by
+        // e.g. Shrinkler's own crunched output) via a real FS-UAE
+        // experiment across three Kickstart versions - see the commit
+        // that introduced execram's own two-hunk container
+        // (docs/memory-lifecycle.md) for the probe and raw results. It
+        // may never be *larger* - that would mean the file's body
+        // overruns what was actually allocated for it.
+        if (size_bytes > planned_sizes[i]) return error.MalformedHunk;
 
         const data: []const u8 = if (kind == .bss) &.{} else try c.take(size_bytes);
 

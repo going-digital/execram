@@ -79,7 +79,7 @@ echo "== packing with execram (--backend=$BACKEND, the one actually booted below
 PACKED_EXE="$WORK_DIR/packed.exe"
 "$EXECRAM" pack "--backend=$BACKEND" "$PROGRAM_EXE" "$PACKED_EXE"
 
-echo "== extracting the inner container =="
+echo "== validating the packed file's shape =="
 CONTAINER_BIN="$WORK_DIR/container.bin"
 python3 "$SCRIPT_DIR/e2e/extract_container.py" "$PACKED_EXE" "$CONTAINER_BIN"
 CONTAINER_LEN="$(wc -c <"$CONTAINER_BIN" | tr -d ' ')"

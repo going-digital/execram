@@ -22,6 +22,10 @@ const musashi_bench = @import("musashi_bench.zig");
 /// Real backends replace this in later milestones (see PROJECT_PLAN.md).
 const stub_example = @embedFile("stub_example");
 
+/// Hunk 0's own body for every backend alike (docs/memory-lifecycle.md's
+/// "new default" - see stubs/common/trampoline.s's own header comment).
+const stub_trampoline = @embedFile("stub_trampoline");
+
 /// Depacker stubs (stubs/<name>/stub.s), assembled and embedded at
 /// build time (build.zig).
 const stub_store = @embedFile("stub_store");
@@ -295,10 +299,31 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
     return .{ .payload = payload, .backend_id = backend_id, .stub_bytes = stub_bytes, .stub_listing = stub_listing };
 }
 
+/// Hunk 0's own declared/allocated size (src/container.zig's
+/// writeHunkExecutable). NOT simply code_data_size + bss_size: Depack
+/// writes code_data_size + reloc_stream_size bytes into hunk 0 (the
+/// reloc stream occupies the same trailing region BSS ends up in,
+/// before RelocFixup consumes it and the BSS-reclear step zeroes that
+/// region for real - docs/memory-lifecycle.md), so hunk 0 must be sized
+/// for whichever of the two is larger, exactly like the single-
+/// allocation scheme's own AllocMem size before it (stubs/common/
+/// runtime.i's history) - dropping that `max` here reintroduces the
+/// same overflow it fixed, just one level up: a real bug, caught by
+/// tests/uae/run_e2e_test.sh's own tiny test program (0 bytes BSS, a
+/// 3-byte reloc stream - reloc_stream_size > bss_size, unlike every
+/// real-world program tried before it, which all happened to have
+/// bss_size dominate) after the two-hunk redesign, not before. Rounded
+/// up to a longword: unlike AllocMem's own byte-granular size argument,
+/// a HUNK_HEADER size-table entry is a count of longwords.
+fn hunk0Size(image: flatten.FlatImage) u32 {
+    const tail = @max(image.bss_size, @as(u32, @intCast(image.reloc_stream.len)));
+    return @intCast(std.mem.alignForward(usize, image.code_data.len + tail, 4));
+}
+
 fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash: bool) ![]u8 {
     const compressed = try compressWithBackend(arena, image, backend_name, verbose);
     const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, flash);
-    return container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
+    return container.writeHunkExecutable(arena, stub_trampoline, container_bytes, hunk0Size(image), image.mem_chip);
 }
 
 /// Mirrors packWithBackend's own dispatch, one function per backend
@@ -435,7 +460,7 @@ fn cmdBench(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         // entirely, so it could never affect anything this table
         // measures.
         const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, false);
-        const exe_bytes = try container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
+        const exe_bytes = try container.writeHunkExecutable(arena, stub_trampoline, container_bytes, hunk0Size(image), image.mem_chip);
         const ratio = @as(f64, @floatFromInt(exe_bytes.len)) / @as(f64, @floatFromInt(input_bytes.len)) * 100.0;
 
         const matches = std.mem.eql(u8, result.output, expected);

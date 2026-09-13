@@ -86,10 +86,13 @@ pub fn main(init: std.process.Init) !void {
 
     var file = try hunk.parse(allocator, exe_bytes);
     defer file.deinit();
-    if (file.hunks.len != 1 or file.hunks[0].kind != .code) {
-        return error.NotASingleCodeHunkFile;
+    // docs/memory-lifecycle.md: hunk 0 is the trampoline, hunk 1 holds
+    // the actual stub+header+payload container - see src/info.zig's own
+    // identical check for the full rationale.
+    if (file.hunks.len != 2 or file.hunks[0].kind != .code or file.hunks[1].kind != .code) {
+        return error.NotATwoHunkCodeFile;
     }
-    const container_data = file.hunks[0].data;
+    const container_data = file.hunks[1].data;
 
     var known_list: [known_stubs.len]info.KnownStub = undefined;
     for (known_stubs, 0..) |entry, i| known_list[i] = entry.known;
