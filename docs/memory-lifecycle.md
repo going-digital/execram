@@ -168,3 +168,83 @@ before/after story, with the exact numbers, lives in
 `docs/format-spec.md` §8 and that commit's own message
 (`git log --oneline --grep="512KB"` finds it) - this page describes only
 the current, shipped design.
+
+## Comparison: how Shrinkler's own decrunchers handle this
+
+execram vendors Shrinkler's raw LZ77+range-decoder routine
+(`stubs/shrinkler/ShrinklerDecompress.s` - `docs/algorithm-notes/shrinkler.md`)
+but not any of its three original decrunch headers, memory scheme
+included - the container, allocation, and handoff mechanics documented
+above are execram's own design throughout. Reading the real upstream
+source (`askeksa/Shrinkler` at `17cff110fcded387fe90e632805258d9c8359e94`,
+the exact commit `docs/LICENSES.md` §1 already audits) is instructive
+regardless, since it takes a structurally different approach and gets a
+better result in its default mode.
+
+**Shrinkler never flattens hunks.** A crunched Shrinkler executable keeps
+the original program's exact hunk count, sizes, and per-hunk memory type,
+and appends exactly one extra hunk (`newnumhunks = numhunks + 1` in
+`cruncher/HunkFile.h`'s `crunch()`). AmigaDOS's `LoadSeg` allocates *all*
+of these - the N real hunks plus the one extra - before any of
+Shrinkler's own code runs, exactly like loading any ordinary multi-hunk
+program. There is no `AllocMem` call anywhere in any of its three decrunch
+headers (`decrunchers/Header.S`, `MiniHeader.S`, `OverlapHeader.S`) -
+`LoadSeg` itself is the only allocator, for every buffer, in every mode.
+
+Three build-time modes, three different outcomes for that one extra hunk:
+
+- **Default (`Header.S`)**: the extra hunk holds the decrunch code plus
+  one combined compressed bitstream for the whole program. A tiny
+  trampoline (`Header1`, appended into hunk 0's own memory) walks
+  AmigaDOS's own hunk-chain linked list - every loaded hunk carries a
+  pointer to the next one, written by `LoadSeg` itself - to reach it,
+  then `Header2` decodes each original hunk's share of the stream
+  **directly into that hunk's own already-allocated final memory**, hunk
+  by hunk, applying relocations against those now-final addresses as it
+  goes. Once every hunk is done, it flushes the instruction cache
+  (`CacheClearU`, skipped on plain 68000s which have none) and then -
+  **the one `FreeMem` call in the entire codebase** - frees that one
+  extra hunk before jumping into the finished program. Net effect: peak
+  memory is resident size plus one scratch hunk, same shape as execram's
+  own peak; but Shrinkler's scratch hunk gets reclaimed, so its
+  steady-state memory, once running, is the resident size alone.
+  execram's loaded hunk never does (see "What never happens" above) -
+  this is the one respect in which Shrinkler's default mode is
+  straightforwardly better than execram's current design.
+- **`--mini`**: the smallest possible decrunch header, restricted to a
+  single-hunk input. Its own extra hunk (decrunch code + compressed
+  data) is never freed - `MiniHeader.S` contains no `FreeMem` call at
+  all. This mode ends up in the *same* situation execram is in today,
+  not a better one.
+- **`--overlap`**: true in-place decompression, and the mode execram's
+  own `safety_margin` field (`docs/format-spec.md` §3, §10) already
+  gestures at without implementing. No shared scratch hunk exists at
+  all - at pack time, `HunkFile.h`'s `verify()` actually *runs* the
+  decompression for each hunk and measures the worst-case gap between
+  its read and write pointers (`front_overlap_margin`), a proven number
+  for that specific compressed output, not a generic theoretical bound -
+  then bakes `hunksize = max(original_memsize, margin-based minimum)`
+  into that hunk's own inflated `LoadSeg` allocation. At runtime, each
+  hunk moves its own embedded compressed bytes to its own tail and
+  decodes forward from its own start, the proven margin guaranteeing the
+  write pointer never overtakes the read pointer. The only hunk added is
+  `OverlapHeader`'s own tiny entry stub (no bulk data in it at all,
+  since every real hunk now carries its own) - never freed either, but
+  a few hundred bytes of decrunch code, not a whole compressed payload.
+
+| | Extra scratch beyond the resident program | Ever freed? | Steady-state dead weight |
+|---|---|---|---|
+| execram (current) | one whole loaded hunk (stub+header+compressed payload) | never | full compressed file size, forever |
+| Shrinkler default | one extra hunk (decrunch code + whole combined bitstream) | **yes** - the one `FreeMem` call in the codebase | none |
+| Shrinkler `--mini` | one extra hunk (decrunch code + compressed data) | never | full compressed data size, forever - same category execram is in |
+| Shrinkler `--overlap` | none (each hunk carries its own compressed tail) | n/a - no scratch hunk holds bulk data | a few hundred bytes (the entry stub only) |
+
+Worth flagging, found while reading this code rather than something this
+page can resolve on its own: Shrinkler's default and `--overlap` modes
+both call `CacheClearU` before jumping into freshly-decompressed code,
+skipped only on plain 68000s. execram's runtime never does this. Whether
+that's a real gap on 68020+ real hardware (as opposed to moot, if freshly
+`AllocMem`'d memory is never already sitting in an instruction cache to
+begin with) hasn't been investigated - noted here rather than in
+`docs/format-spec.md` §10 since it's a runtime-correctness question, not
+a format one.

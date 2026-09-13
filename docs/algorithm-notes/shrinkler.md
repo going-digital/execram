@@ -55,3 +55,11 @@ bug this surfaced - its "preserves A2-A6" claim only holds in the sense
 that it never *writes* those registers, not that whatever value it's
 handed survives for the caller's own purposes. See `stubs/shrinkler/
 stub.s`'s own comment for the full story if you're touching this file.
+
+Only the raw decompression routine is vendored, not any of Shrinkler's
+own decrunch headers or memory scheme - `docs/memory-lifecycle.md`'s
+"Comparison: how Shrinkler's own decrunchers handle this" covers what
+those actually do (per-hunk allocation via `LoadSeg` itself, no
+`AllocMem`, and - in its default mode - the one `FreeMem` call anywhere
+in the whole codebase, freeing its own scratch hunk once decompression
+finishes).
