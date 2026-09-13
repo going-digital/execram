@@ -3,7 +3,7 @@
 The baseline backend: no compression at all. The "compressed" payload
 is `code_data ++ reloc_stream`, byte-for-byte (`src/backends/store.zig`).
 Its depacker (`stubs/store/stub.s`) is a plain longword copy loop from
-the container's payload straight into the scratch buffer
+the container's payload straight into the resident buffer
 `stubs/common/runtime.i` already allocated - there is nothing to
 decode.
 
@@ -26,8 +26,10 @@ Two reasons, one from each end of the project's life:
 
 ## Format
 
-None. The stub's job is exactly `CopyCodeData` plus, if the header says
-so, `RelocFixup` - both already implemented once, shared by every
-backend, in `stubs/common/runtime.i`. `stubs/store/stub.s` itself is a
-handful of lines gluing the container's payload pointer to that shared
-copy loop.
+None. `Depack:` is a plain copy loop from the compressed payload
+straight into the buffer `stubs/common/runtime.i` already allocated for
+the resident image (`Start:` decompresses directly into `final`, not a
+separate scratch buffer - see `docs/format-spec.md` §8) - `store`'s own
+`Depack:` is *literally* that copy loop, since there's nothing to
+decode. `RelocFixup`, if the header says it's needed, is shared by every
+backend already, also in `stubs/common/runtime.i`.

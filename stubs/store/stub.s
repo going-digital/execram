@@ -11,10 +11,11 @@
 ; Preserves D2-D7/A2-A6 per runtime.i's contract (trivially true here -
 ; this only touches D0/D1/A0/A1 anyway).
 ;
-; D0 has no multiple-of-4 guarantee (unlike CopyCodeData's length in
-; runtime.i): it's code_data_size + reloc_stream_size, and reloc_stream
-; bytes aren't longword-counted. Longword-copy the bulk, then finish any
-; 0-3 remaining bytes individually.
+; D0 has no multiple-of-4 guarantee (unlike code_data_size alone, always
+; a multiple of 4 since every hunk's own size is stored in longwords -
+; see src/hunk.zig): it's code_data_size + reloc_stream_size, and
+; reloc_stream bytes aren't longword-counted. Longword-copy the bulk,
+; then finish any 0-3 remaining bytes individually.
 Depack:
 	move.l	d0,d1
 	lsr.l	#2,d0

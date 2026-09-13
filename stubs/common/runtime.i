@@ -45,20 +45,54 @@ Start:
 
 	move.l	4.w,a6			; ExecBase
 
-	; scratch = AllocMem(code_data_size + reloc_stream_size, MEMF_ANY)
+	; final = AllocMem(code_data_size + max(bss_size, reloc_stream_size), MEMF_CLEAR [| MEMF_CHIP])
+	;
+	; One allocation, not two: Depack decompresses DIRECTLY into this
+	; buffer (no separate "scratch" AllocMem, no CopyCodeData, no
+	; FreeMem) - the buffer just needs to be big enough for whichever
+	; is larger, the real BSS tail the program needs at runtime, or
+	; the reloc stream RelocFixup still has to read right after Depack
+	; returns (both occupy the same trailing region, just at different
+	; times - Depack/RelocFixup leave that region holding whatever's
+	; left of the reloc stream, not zero, so it's explicitly re-cleared
+	; below, right before jumping in, to satisfy the program's own BSS
+	; convention).
+	;
+	; This isn't just fewer library calls: the ORIGINAL packed image
+	; (this stub + header + compressed payload) is never freed - it's
+	; the process's own code segment for its whole lifetime, not
+	; memory we control - so the old two-allocation scheme needed the
+	; original packed image AND a full scratch buffer AND a full final
+	; buffer all resident at once, right after the second AllocMem and
+	; before the first is freed. On a base 512KB Amiga that peak can
+	; easily exceed total memory even when the packed file is much
+	; smaller than the original - confirmed directly: a real 221KB
+	; program packed with zultra needed a peak of ~564KB (144KB packed
+	; + 216KB scratch + 218KB final) under the old scheme, comfortably
+	; over 512KB on its own before Kickstart's own overhead - and only
+	; ~354KB under this one.
 	move.l	HDR_CODE_DATA_SIZE(a2),d0
-	add.l	HDR_RELOC_STREAM_SIZE(a2),d0
-	moveq	#0,d1			; MEMF_ANY
+	move.l	HDR_BSS_SIZE(a2),d1
+	cmp.l	HDR_RELOC_STREAM_SIZE(a2),d1
+	bcc.s	.tailok			; bss_size >= reloc_stream_size already
+	move.l	HDR_RELOC_STREAM_SIZE(a2),d1
+.tailok:
+	add.l	d1,d0
+	move.l	#MEMF_CLEAR,d1
+	btst	#0,HDR_FLAGS(a2)	; FLAG_MEM_CHIP
+	beq.s	.notchip
+	or.l	#MEMF_CHIP,d1
+.notchip:
 	jsr	EXEC_AllocMem(a6)
-	move.l	d0,a3			; a3 = scratch base, preserved
+	move.l	d0,a4			; a4 = final base (Depack's output too)
 	tst.l	d0
 	beq.w	Fail
 
-	; Depack(compressed payload -> scratch)
+	; Depack(compressed payload -> final)
 	moveq	#0,d1
 	move.w	HDR_HEADER_SIZE(a2),d1
 	lea	0(a2,d1.l),a0		; a0 = compressed payload
-	move.l	a3,a1			; a1 = output = scratch
+	move.l	a4,a1			; a1 = output = final, directly
 	move.l	HDR_COMPRESSED_SIZE(a2),d0
 
 	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH
@@ -71,34 +105,31 @@ Start:
 	move.w	#0,CUSTOM_COLOR00	; codes along with D0/D1/A0/A1.
 .noflashoff:
 
-	; final = AllocMem(code_data_size + bss_size, MEMF_CLEAR [| MEMF_CHIP])
-	; MEMF_CLEAR zeros the whole block, so the BSS tail needs no
-	; explicit clearing loop (docs/format-spec.md §8 step 4).
-	move.l	HDR_CODE_DATA_SIZE(a2),d0
-	add.l	HDR_BSS_SIZE(a2),d0
-	move.l	#MEMF_CLEAR,d1
-	btst	#0,HDR_FLAGS(a2)	; FLAG_MEM_CHIP
-	beq.s	.notchip
-	or.l	#MEMF_CHIP,d1
-.notchip:
-	jsr	EXEC_AllocMem(a6)
-	move.l	d0,a4			; a4 = final base
-	tst.l	d0
-	beq.w	Fail
-
-	bsr.w	CopyCodeData
 	btst	#1,HDR_FLAGS(a2)	; FLAG_HAS_RELOCS
 	beq.s	.norelocs
 	bsr.w	RelocFixup
 .norelocs:
 
-	; FreeMem(scratch, code_data_size + reloc_stream_size) - same size
-	; expression as the AllocMem call that produced it; Exec's allocator
-	; requires the exact original size back.
+	; Clear BSS: this region of the buffer still holds whatever Depack/
+	; RelocFixup last left there (the just-consumed reloc stream, when
+	; there was one - shorter than bss_size whenever reloc_stream_size
+	; < bss_size, so its tail is stale AllocMem-time zero but the head
+	; is leftover reloc-stream bytes either way). The program's BSS must
+	; be all-zero at entry, so clear it again here rather than relying
+	; on AllocMem's own MEMF_CLEAR, which only zeroed this space
+	; *before* Depack/RelocFixup wrote all over it. bss_size is always a
+	; multiple of 4 - hunk sizes are stored in longwords, same guarantee
+	; code_data_size has (see stubs/store/stub.s's own comment).
 	move.l	HDR_CODE_DATA_SIZE(a2),d0
-	add.l	HDR_RELOC_STREAM_SIZE(a2),d0
-	move.l	a3,a1
-	jsr	EXEC_FreeMem(a6)
+	lea	0(a4,d0.l),a0		; a0 = start of BSS within final
+	move.l	HDR_BSS_SIZE(a2),d0
+	lsr.l	#2,d0
+	beq.s	.bssdone
+.bssclear:
+	clr.l	(a0)+
+	subq.l	#1,d0
+	bne.s	.bssclear
+.bssdone:
 
 	jmp	(a4)
 
@@ -109,33 +140,15 @@ Fail:
 	; garbage.
 	bra.s	Fail
 
-; Copies the first code_data_size bytes of scratch(a3) to final(a4).
-; Every hunk's size is stored in longwords in the source file
-; (src/hunk.zig), so code_data_size - a sum of hunk sizes - is always a
-; multiple of 4: no byte-remainder handling needed here (contrast
-; Depack, whose input length has no such guarantee).
-CopyCodeData:
-	move.l	HDR_CODE_DATA_SIZE(a2),d0
-	lsr.l	#2,d0
-	move.l	a3,a0
-	move.l	a4,a1
-.loop:
-	tst.l	d0
-	beq.s	.done
-	move.l	(a0)+,(a1)+
-	subq.l	#1,d0
-	bra.s	.loop
-.done:
-	rts
-
-; Walks the reloc stream (docs/format-spec.md §7) at
-; scratch+code_data_size, patching each recorded site in final(a4) by
-; adding final's own runtime base address to whatever's already there
-; (flatten.zig already folded each site's target-hunk offset into that
-; stored value - see src/flatten.zig's module doc).
+; Walks the reloc stream (docs/format-spec.md §7) at final+code_data_size
+; (Depack wrote code_data ++ reloc_stream there directly - no separate
+; scratch buffer to read it from anymore), patching each recorded site
+; in final(a4) by adding final's own runtime base address to whatever's
+; already there (flatten.zig already folded each site's target-hunk
+; offset into that stored value - see src/flatten.zig's module doc).
 RelocFixup:
 	move.l	HDR_CODE_DATA_SIZE(a2),d0
-	lea	0(a3,d0.l),a5		; a5 = reloc-stream read pointer
+	lea	0(a4,d0.l),a5		; a5 = reloc-stream read pointer
 	moveq	#0,d6			; d6 = running site offset ("prev")
 .next:
 	moveq	#0,d1

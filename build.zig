@@ -10,6 +10,10 @@ const Stub = struct {
     /// Passed to vasm as `-I<dir>` when the stub `include`s shared code
     /// (stubs/common/) - see stubs/store/stub.s.
     include_dir: ?[]const u8 = null,
+    /// Every other file `source` (transitively) `include`s/`.include`s,
+    /// listed explicitly so it can be registered as a cache input below -
+    /// see `addIncludedFileInputs`'s doc comment for why this exists.
+    extra_includes: []const []const u8 = &.{},
     /// vasm's syntax module is chosen per invocation and can't be mixed
     /// within one assembly. Everything is Motorola/Devpac syntax
     /// (vasmm68k_mot) except the inflate stub, which needs vasm's
@@ -18,12 +22,47 @@ const Stub = struct {
     syntax: enum { mot, std } = .mot,
 };
 
+/// Registers `path` as a cache input on `run` via `addFileInput` (tracked
+/// for invalidation, but not added to argv - these files reach vasm
+/// through `-I`/relative `include`, not as direct arguments). Without
+/// this, Zig's build cache only hashes the top-level `.source` file
+/// passed via `addFileArg`; an edit to a shared file an `include`/
+/// `.include` directive pulls in (stubs/common/runtime.i, stubs/inflate/
+/// runtime_std.i, etc.) is invisible to the cache key, so `zig build`
+/// silently keeps serving a stale assembled stub. Confirmed directly:
+/// editing runtime_std.i alone did not change stub_inflate's cached
+/// output until this was added.
+fn addIncludedFileInputs(b: *std.Build, run: *std.Build.Step.Run, paths: []const []const u8) void {
+    for (paths) |path| run.addFileInput(b.path(path));
+}
+
 const stubs = [_]Stub{
     .{ .name = "stub_example", .source = "stubs/example/hello.s" },
-    .{ .name = "stub_store", .source = "stubs/store/stub.s", .include_dir = "stubs/common" },
-    .{ .name = "stub_inflate", .source = "stubs/inflate/stub.s", .include_dir = "stubs/inflate", .syntax = .std },
-    .{ .name = "stub_zx0", .source = "stubs/zx0/stub.s", .include_dir = "stubs/common" },
-    .{ .name = "stub_shrinkler", .source = "stubs/shrinkler/stub.s", .include_dir = "stubs/common" },
+    .{
+        .name = "stub_store",
+        .source = "stubs/store/stub.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i" },
+    },
+    .{
+        .name = "stub_inflate",
+        .source = "stubs/inflate/stub.s",
+        .include_dir = "stubs/inflate",
+        .extra_includes = &.{ "stubs/inflate/runtime_std.i", "stubs/inflate/header_std.i", "stubs/inflate/inflate_core.s" },
+        .syntax = .std,
+    },
+    .{
+        .name = "stub_zx0",
+        .source = "stubs/zx0/stub.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000.s" },
+    },
+    .{
+        .name = "stub_shrinkler",
+        .source = "stubs/shrinkler/stub.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/shrinkler/ShrinklerDecompress.s" },
+    },
 };
 
 /// A real hunk executable built at test time (vasm assembles to a linkable
@@ -349,6 +388,7 @@ pub fn build(b: *std.Build) void {
         if (stub.include_dir) |dir| {
             assemble.addArg(b.fmt("-I{s}", .{dir}));
         }
+        addIncludedFileInputs(b, assemble, stub.extra_includes);
         assemble.addFileArg(b.path(stub.source));
         assemble.addArg("-o");
         const bin = assemble.addOutputFileArg(b.fmt("{s}.bin", .{stub.name}));
@@ -382,6 +422,7 @@ pub fn build(b: *std.Build) void {
         if (stub.include_dir) |dir| {
             assemble_listing.addArg(b.fmt("-I{s}", .{dir}));
         }
+        addIncludedFileInputs(b, assemble_listing, stub.extra_includes);
         // vasm rejects a concatenated "-L<path>" (confirmed directly:
         // "error 15: unknown option") - unlike some other single-letter
         // flags, it needs "-L" and the path as two separate argv

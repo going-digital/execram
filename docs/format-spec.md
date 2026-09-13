@@ -79,7 +79,7 @@ fields start at a 4-byte-aligned offset.
 | 16     | 4    | `bss_size`            | Zero-filled bytes appended immediately after `code_data_size` in the final resident image. **Not present in the compressed payload** — BSS is pure zeros, compressing and decompressing it would waste time and (a little) space for nothing. |
 | 20     | 4    | `reloc_stream_size`   | Bytes of the reloc stream (§6), 0 if `flags` bit 1 is clear. |
 | 24     | 4    | `compressed_size`     | Bytes of the compressed payload, immediately following this header. |
-| 28     | 4    | `safety_margin`       | Reserved, must be 0 in v0 (see §7 — v0 always decompresses into a separate buffer, so no backend-specific expansion margin is needed yet). |
+| 28     | 4    | `safety_margin`       | Reserved, must be 0 in v0 (see §8 — the compressed payload and the buffer being decompressed into never overlap in v0, so no backend-specific expansion margin is needed yet). |
 
 Header size in v0: 32 bytes.
 
@@ -164,38 +164,62 @@ itself):
    its own code (§2). Check `magic` and `version_major`; if either is
    wrong, there's nothing sensible to do (v0 doesn't define recovery
    behavior — there's only one major version so far).
-2. `scratch = AllocMem(code_data_size + reloc_stream_size, MEMF_ANY)`.
+2. `final = AllocMem(code_data_size + max(bss_size, reloc_stream_size), MEMF_CLEAR | chip_flag)`.
+   One allocation, not two (see below for why that used to be two and
+   isn't anymore) — sized to hold whichever tail is larger: the real
+   BSS the program needs at runtime, or the reloc stream the next step
+   still has to read (they occupy the same trailing region, just at
+   different times — the reloc stream is fully consumed by step 4
+   before anything cares what "BSS" actually contains there).
 3. Call the backend's depack routine: input = the compressed payload
    (still sitting in the currently-loaded hunk, right after the header),
-   output = `scratch`. This is the only backend-specific step.
-4. `final = AllocMem(code_data_size + bss_size, MEMF_CLEAR | chip_flag)` —
-   `MEMF_CLEAR` zeros the whole block, so the BSS tail needs no explicit
-   clearing loop.
-5. Copy the first `code_data_size` bytes of `scratch` to `final`.
-6. If `flags` bit 1 is set, walk the reloc stream (the trailing
-   `reloc_stream_size` bytes of `scratch`) and, for each decoded offset,
-   add `final`'s runtime address to the longword at `final + offset`.
-7. `FreeMem(scratch, ...)`.
-8. Jump to `final + 0`.
+   output = `final`, directly. This is the only backend-specific step.
+4. If `flags` bit 1 is set, walk the reloc stream (the trailing
+   `reloc_stream_size` bytes of `final`, right after `code_data_size`)
+   and, for each decoded offset, add `final`'s runtime address to the
+   longword at `final + offset`.
+5. Clear `final[code_data_size .. code_data_size + bss_size]` again,
+   unconditionally. Step 3 wrote `code_data_size + reloc_stream_size`
+   bytes there (code_data followed by the reloc stream, if any), which
+   only fills that region with zero when `reloc_stream_size >=
+   bss_size` — whenever the reloc stream is the *shorter* of the two
+   (the common case), its tail leaves leftover reloc-stream bytes sitting
+   where the program's BSS needs to be all-zero at entry. `AllocMem`'s
+   own `MEMF_CLEAR` doesn't help here either: it only zeroed this region
+   *before* steps 3–4 wrote all over it. `bss_size` is always a multiple
+   of 4 (hunk sizes are stored in longwords), so this is a plain
+   longword-clear loop.
+6. Jump to `final + 0`.
 
-This always works and never needs a safety margin, at the cost of a
-second allocation, a copy, and briefly holding both buffers in memory —
-deliberately the simple, obviously-correct version for v0. The original
-loaded hunk (stub + header + compressed payload) is left allocated for
-the process's lifetime rather than freed — a small (compressed-size-sized)
-permanent waste, acceptable for now.
+**This replaced an earlier two-allocation version** (`scratch =
+AllocMem(code_data_size + reloc_stream_size, MEMF_ANY)`, depack into
+`scratch`, `final = AllocMem(code_data_size + bss_size, MEMF_CLEAR)`,
+copy `scratch`'s first `code_data_size` bytes to `final`, fix up
+`final`, `FreeMem(scratch, ...)`, jump). That version was simple and
+obviously correct, but genuinely ran out of memory on real, memory-
+constrained hardware: the original loaded hunk (this stub + header +
+compressed payload) is never freed — it's the process's own code
+segment for its whole lifetime, not memory under our control — so at
+the moment `final` was allocated but `scratch` not yet freed, all
+three had to fit in memory simultaneously. Confirmed directly on a
+real 221KB program packed with zultra: a peak of ~564KB (144KB packed
++ 216KB scratch + 218KB final), comfortably over a base Amiga's entire
+512KB before Kickstart's own overhead - it packed and self-checked
+fine on the host, and even decompressed correctly under emulation, but
+had nowhere to get to on an actual 512KB machine. The one-allocation
+version above needs ~354KB instead for the same file (the packed
+image plus one buffer, not two), by decompressing straight into the
+buffer that becomes the resident image instead of a separate one that
+gets thrown away.
 
-**Future optimization, not v0:** when `bss_size >= reloc_stream_size`,
-skip `scratch` entirely — decompress straight into `final`, using the
-soon-to-be-BSS tail as reloc-stream scratch space, run fixup, then
-explicitly zero just the BSS region afterward (instead of relying on
-`MEMF_CLEAR` up front, which would otherwise get overwritten and need
-re-zeroing anyway). This is Shrinkler's `OverlapHeader.S` idea in spirit —
-decompressing back into memory you already hold instead of allocating
-twice — generalized to the code+data/BSS/reloc-stream split here. It
-needs `safety_margin` to actually mean something (a backend-specific
-worst-case bound), which is why that field exists already even though
-it's pinned to 0 until this lands.
+This isn't full in-place/overlapping decompression the way Shrinkler's
+own `OverlapHeader.S` does it (compressed and decompressed data sharing
+even the *same* bytes, needing a backend-specific worst-case expansion
+bound to prove it's always safe) - `safety_margin` remains reserved
+and pinned to 0 for that reason. It's a narrower, always-safe
+simplification: the compressed payload and the buffer being decompressed
+into never overlap (the payload stays in the original hunk throughout),
+only the *two post-decompression allocations* got merged into one.
 
 ## 9. Versioning policy
 
@@ -215,9 +239,14 @@ safely ignore (a newly-meaningful reserved flag bit, say).
   `bss_heavy` item adds a real CODE→BSS relocation target, all
   byte-exact-verified on real hardware. No density or pattern problems
   found; §7 stands as originally specified.
-- Overlap-in-place decompression (§8's future optimization) — needs a
-  proven safety-margin formula per backend before it can ship; each
-  backend's `docs/algorithm-notes/` entry should derive one when ready.
+- ~~The two-allocation runtime scheme (§8) can exceed memory on a base
+  512KB Amiga even for programs much smaller than that~~ — fixed: the
+  two post-decompression allocations (`scratch`, `final`) are merged
+  into one (§8). True overlap-in-place decompression (compressed and
+  decompressed data sharing the *same* bytes, not just one merged
+  post-decompression buffer) remains open - it needs a proven
+  safety-margin formula per backend before it can ship; each backend's
+  `docs/algorithm-notes/` entry should derive one when ready.
 - CPU-tiered stubs (68000 vs. 68020+), noted as an open question in
   [PROJECT_PLAN.md](../PROJECT_PLAN.md) §10, would most naturally live as
   another `flags` bit or a small stub-selection table in the host tool,
