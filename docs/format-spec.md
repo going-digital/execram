@@ -106,7 +106,7 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 
 | Bit | Name | Meaning when set |
 |----:|------|-------------------|
-| 0   | `MEM_CHIP` | Allocate the resident image in Chip RAM (`MEMF_CHIP`). Clear means `MEMF_ANY` (or a Fast-RAM preference — TBD when M1 actually decides original-hunk memory attributes). |
+| 0   | `MEM_CHIP` | Allocate the resident image in Chip RAM (`MEMF_CHIP`). Clear means `MEMF_ANY` — a binary choice, decided by `execram pack` from the original executable's own hunk memory attributes (any hunk requesting Chip RAM sets it for the whole merged image) and overridable via `--mem=chip\|fast` (`src/main.zig`, `container.zig`'s `mem_chip` field). |
 | 1   | `HAS_RELOCS` | A reloc stream follows the code+data in the decompressed payload (§6). If clear, `reloc_stream_size` must be 0 and the fixup pass is skipped entirely. |
 | 2   | `FLASH` | Purely cosmetic, no effect on decoding: the stub sets `COLOR00` (the background/border colour register, `$dff180`) to a fixed bright colour immediately before calling the backend's `Depack:`, and restores it to black immediately after — a visible "something is happening" indicator for slow backends on real hardware, where a large file can otherwise sit at a blank screen for tens of seconds with no sign the machine hasn't hung. Set by `execram pack --flash`. |
 | 3-7 | *(reserved)* | Must be 0 in v0. A stub must ignore reserved bits it doesn't understand rather than reject the file — only a `version_major` bump means "you must understand this to run me correctly." |
