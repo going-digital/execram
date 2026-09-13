@@ -23,6 +23,18 @@ EXEC_FreeMem	=	-210
 MEMF_CHIP	=	2
 MEMF_CLEAR	=	$10000
 
+; FLAG_FLASH support (docs/format-spec.md §5): a purely cosmetic,
+; optional "something is happening" indicator for slow backends on
+; real hardware - decompression of a large file under a backend like
+; shrinkler can take tens of seconds of real 68000 time (see
+; tools/bench's own measurements), with nothing else on screen to show
+; the machine hasn't hung. COLOR00 is the background/border colour
+; register - a real, fixed hardware address, not a relocatable program
+; one, same category as the other absolute addresses this file already
+; uses (EXEC_AllocMem/EXEC_FreeMem via a6, ExecBase itself via 4.w).
+CUSTOM_COLOR00	=	$dff180
+FLASH_COLOR	=	$0f00		; bright red
+
 Start:
 	lea	StubEnd(pc),a2		; a2 = header base, preserved throughout
 
@@ -48,7 +60,16 @@ Start:
 	lea	0(a2,d1.l),a0		; a0 = compressed payload
 	move.l	a3,a1			; a1 = output = scratch
 	move.l	HDR_COMPRESSED_SIZE(a2),d0
+
+	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH
+	beq.s	.noflashon
+	move.w	#FLASH_COLOR,CUSTOM_COLOR00
+.noflashon:
 	bsr.w	Depack
+	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH - re-tested, not cached:
+	beq.s	.noflashoff		; Depack is free to clobber condition
+	move.w	#0,CUSTOM_COLOR00	; codes along with D0/D1/A0/A1.
+.noflashoff:
 
 	; final = AllocMem(code_data_size + bss_size, MEMF_CLEAR [| MEMF_CHIP])
 	; MEMF_CLEAR zeros the whole block, so the BSS tail needs no

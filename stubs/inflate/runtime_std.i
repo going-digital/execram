@@ -23,6 +23,11 @@
 .equ MEMF_CHIP,2
 .equ MEMF_CLEAR,0x10000
 
+; FLAG_FLASH support (docs/format-spec.md §5) - see ../common/runtime.i's
+; own comment (kept in sync by hand, like everything else in this file).
+.equ CUSTOM_COLOR00,0xdff180
+.equ FLASH_COLOR,0x0f00		; bright red
+
 Start:
 	lea	StubEnd(pc),a2		; a2 = header base, preserved throughout
 
@@ -48,7 +53,16 @@ Start:
 	lea	0(a2,d1.l),a0		; a0 = compressed payload
 	move.l	a3,a1			; a1 = output = scratch
 	move.l	HDR_COMPRESSED_SIZE(a2),d0
+
+	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH
+	beq.s	.flashonskip
+	move.w	#FLASH_COLOR,CUSTOM_COLOR00
+.flashonskip:
 	bsr.w	Depack
+	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH - re-tested, not cached:
+	beq.s	.flashoffskip		; Depack is free to clobber condition
+	move.w	#0,CUSTOM_COLOR00	; codes along with D0/D1/A0/A1.
+.flashoffskip:
 
 	; final = AllocMem(code_data_size + bss_size, MEMF_CLEAR [| MEMF_CHIP])
 	; MEMF_CLEAR zeros the whole block, so the BSS tail needs no

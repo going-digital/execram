@@ -30,6 +30,7 @@ pub const KnownStub = struct {
 
 const FLAG_MEM_CHIP: u8 = 1;
 const FLAG_HAS_RELOCS: u8 = 2;
+const FLAG_FLASH: u8 = 4;
 const MAGIC: u32 = 0x45784372; // "ExCr"
 const HEADER_SIZE: usize = 32;
 
@@ -66,6 +67,9 @@ pub const Header = struct {
     }
     pub fn hasRelocs(self: Header) bool {
         return self.flags & FLAG_HAS_RELOCS != 0;
+    }
+    pub fn hasFlash(self: Header) bool {
+        return self.flags & FLAG_FLASH != 0;
     }
     /// Bytes a backend's decompressor must produce from `compressed_size`
     /// bytes of payload (docs/format-spec.md §6: code+data, then the
@@ -140,6 +144,7 @@ pub fn printInfo(
 
     const mem_chip = header.memChip();
     const has_relocs = header.hasRelocs();
+    const has_flash = header.hasFlash();
     const uncompressed_size = header.uncompressedSize();
     const resident_size = header.residentSize();
 
@@ -149,6 +154,7 @@ pub fn printInfo(
     try w.print("  backend_id:          {d} ({s})\n", .{ header.backend_id, backendIdName(header.backend_id) });
     try w.print("  memory:              {s}\n", .{if (mem_chip) "chip" else "any/fast"});
     try w.print("  relocations:         {s}\n", .{if (has_relocs) "yes" else "none"});
+    try w.print("  border flash:        {s}\n", .{if (has_flash) "yes" else "no"});
     try w.print("  header size:         {d} bytes\n", .{header.header_size});
     try w.print("  code+data size:      {d} bytes\n", .{header.code_data_size});
     try w.print("  bss size:            {d} bytes\n", .{header.bss_size});
@@ -190,7 +196,7 @@ test "printInfo reports a real container's fields" {
 
     const stub = "FAKESTUB"; // 8 bytes, arbitrary - not a real assembled stub
     const payload = "COMPRESSEDPAYLOAD!!"; // 19 bytes, arbitrary
-    const container_bytes = try container.buildContainer(allocator, image, .zx0, stub, payload);
+    const container_bytes = try container.buildContainer(allocator, image, .zx0, stub, payload, false);
     defer allocator.free(container_bytes);
     const exe_bytes = try container.writeHunkExecutable(allocator, container_bytes, image.mem_chip);
     defer allocator.free(exe_bytes);
@@ -206,6 +212,7 @@ test "printInfo reports a real container's fields" {
     try std.testing.expect(std.mem.indexOf(u8, report, "backend_id:          2 (zx0-compatible (zx0 or salvador))") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "memory:              chip") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "relocations:         yes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "border flash:        no") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "code+data size:      8 bytes") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "bss size:            100 bytes") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "reloc stream size:   2 bytes") != null);

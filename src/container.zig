@@ -15,6 +15,13 @@ pub const BackendId = enum(u8) {
 
 const FLAG_MEM_CHIP: u8 = 1;
 const FLAG_HAS_RELOCS: u8 = 2;
+/// docs/format-spec.md §5: a purely cosmetic border-colour flash while
+/// `Depack:` runs (stubs/common/runtime.i's own comment has the full
+/// rationale) - additive and backward-compatible (an old stub built
+/// before this existed would just ignore the bit, same as any other
+/// reserved one), hence the version_minor bump below rather than a
+/// version_major one.
+const FLAG_FLASH: u8 = 4;
 const HEADER_SIZE: u16 = 32;
 const MAGIC = 0x45784372; // "ExCr"
 
@@ -28,10 +35,12 @@ pub fn buildContainer(
     backend_id: BackendId,
     stub_bytes: []const u8,
     compressed_payload: []const u8,
+    flash: bool,
 ) ![]u8 {
     var flags: u8 = 0;
     if (image.mem_chip) flags |= FLAG_MEM_CHIP;
     if (image.reloc_stream.len > 1) flags |= FLAG_HAS_RELOCS; // len 1 is just the 0xFE terminator: no sites
+    if (flash) flags |= FLAG_FLASH;
 
     const total = stub_bytes.len + HEADER_SIZE + compressed_payload.len;
     var out = try allocator.alloc(u8, total);
@@ -42,7 +51,7 @@ pub fn buildContainer(
     @memset(h, 0);
     std.mem.writeInt(u32, h[0..4], MAGIC, .big);
     h[4] = 0; // version_major
-    h[5] = 0; // version_minor
+    h[5] = 1; // version_minor: bumped for FLAG_FLASH (docs/format-spec.md §9)
     h[6] = @intFromEnum(backend_id);
     h[7] = flags;
     std.mem.writeInt(u16, h[8..10], HEADER_SIZE, .big);
@@ -140,15 +149,16 @@ test "buildContainer serializes the header per docs/format-spec.md" {
 
     const stub = "STUB";
     const payload = "PAYLOAD!"; // 8 bytes, arbitrary for this test
-    const out = try buildContainer(std.testing.allocator, image, .store, stub, payload);
+    const out = try buildContainer(std.testing.allocator, image, .store, stub, payload, false);
     defer std.testing.allocator.free(out);
 
     try std.testing.expectEqualSlices(u8, stub, out[0..4]);
     const h = out[4..36];
     try std.testing.expectEqual(@as(u32, MAGIC), std.mem.readInt(u32, h[0..4], .big));
     try std.testing.expectEqual(@as(u8, 0), h[4]); // version_major
+    try std.testing.expectEqual(@as(u8, 1), h[5]); // version_minor (bumped for FLAG_FLASH)
     try std.testing.expectEqual(@as(u8, @intFromEnum(BackendId.store)), h[6]); // backend_id
-    try std.testing.expectEqual(FLAG_MEM_CHIP, h[7]); // chip set, has_relocs clear (no real sites)
+    try std.testing.expectEqual(FLAG_MEM_CHIP, h[7]); // chip set, has_relocs/flash clear
     try std.testing.expectEqual(@as(u16, HEADER_SIZE), std.mem.readInt(u16, h[8..10], .big));
     try std.testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, h[12..16], .big)); // code_data_size
     try std.testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, h[16..20], .big)); // bss_size
@@ -156,4 +166,20 @@ test "buildContainer serializes the header per docs/format-spec.md" {
     try std.testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, h[24..28], .big)); // compressed_size
     try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, h[28..32], .big)); // safety_margin
     try std.testing.expectEqualSlices(u8, payload, out[36..]);
+}
+
+test "buildContainer sets FLAG_FLASH when asked" {
+    var image = flatten.FlatImage{
+        .allocator = std.testing.allocator,
+        .code_data = try std.testing.allocator.dupe(u8, &.{ 1, 2, 3, 4 }),
+        .bss_size = 0,
+        .reloc_stream = try std.testing.allocator.dupe(u8, &.{0xFE}),
+        .mem_chip = false,
+    };
+    defer image.deinit();
+
+    const out = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", true);
+    defer std.testing.allocator.free(out);
+
+    try std.testing.expectEqual(FLAG_FLASH, out[4..36][7]);
 }

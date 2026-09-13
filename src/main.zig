@@ -56,7 +56,7 @@ const usage =
     \\
     \\Usage:
     \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto]
-    \\               [--mem=chip|fast] [-v] <in> <out>
+    \\               [--mem=chip|fast] [-v] [--flash] <in> <out>
     \\  execram info <packed-exe>
     \\  execram bench [--all] <in>
     \\  execram --version
@@ -79,6 +79,13 @@ const usage =
     \\
     \\-v prints per-backend sizes (in --backend=auto mode) and image
     \\statistics as packing proceeds, not just the final result.
+    \\
+    \\--flash sets the border colour (COLOR00) to a fixed bright colour
+    \\just before decompression starts and restores it to black just
+    \\after - a purely cosmetic "something is happening" indicator for
+    \\slow backends (shrinkler on a large file can take tens of seconds
+    \\of real 68000 time - see `execram bench`), with nothing else on
+    \\screen otherwise to show the machine hasn't hung.
     \\
     \\Every pack self-checks before writing anything: the chosen
     \\backend's compressed output is decompressed host-side and compared
@@ -149,6 +156,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     var backend_name: []const u8 = "auto";
     var mem_override: ?bool = null; // true = force chip, false = force fast/any
     var verbose = false;
+    var flash = false;
     var positional: std.ArrayList([]const u8) = .empty;
     for (args) |arg| {
         if (std.mem.startsWith(u8, arg, "--backend=")) {
@@ -165,12 +173,14 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
             }
         } else if (std.mem.eql(u8, arg, "-v")) {
             verbose = true;
+        } else if (std.mem.eql(u8, arg, "--flash")) {
+            flash = true;
         } else {
             try positional.append(arena, arg);
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto] [--mem=chip|fast] [-v] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -200,9 +210,9 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     const exe_bytes, const used_backend = if (std.mem.eql(u8, backend_name, "auto"))
-        try packAuto(arena, image, verbose)
+        try packAuto(arena, image, verbose, flash)
     else
-        .{ try packWithBackend(arena, image, backend_name, verbose), backend_name };
+        .{ try packWithBackend(arena, image, backend_name, verbose, flash), backend_name };
 
     try cwd.writeFile(io, .{ .sub_path = out_path, .data = exe_bytes });
 
@@ -214,11 +224,11 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
 /// Tries every backend in `backend_names` and returns the smallest
 /// resulting output, along with which backend produced it - Shrinkler's
 /// own "just try it" approach to backend selection (PROJECT_PLAN.md M3).
-fn packAuto(arena: std.mem.Allocator, image: flatten.FlatImage, verbose: bool) !struct { []u8, []const u8 } {
+fn packAuto(arena: std.mem.Allocator, image: flatten.FlatImage, verbose: bool, flash: bool) !struct { []u8, []const u8 } {
     var best: ?[]u8 = null;
     var best_name: []const u8 = "";
     for (backend_names) |name| {
-        const candidate = try packWithBackend(arena, image, name, verbose);
+        const candidate = try packWithBackend(arena, image, name, verbose, flash);
         if (best == null or candidate.len < best.?.len) {
             best = candidate;
             best_name = name;
@@ -285,9 +295,9 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
     return .{ .payload = payload, .backend_id = backend_id, .stub_bytes = stub_bytes, .stub_listing = stub_listing };
 }
 
-fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool) ![]u8 {
+fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash: bool) ![]u8 {
     const compressed = try compressWithBackend(arena, image, backend_name, verbose);
-    const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload);
+    const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, flash);
     return container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
 }
 
@@ -419,7 +429,12 @@ fn cmdBench(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
             @intCast(expected.len),
         );
 
-        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload);
+        // flash=false: irrelevant to this command either way -
+        // musashi_bench.timeDepack above jumps straight into `Depack:`,
+        // bypassing `Start:` (where FLAG_FLASH's own code lives)
+        // entirely, so it could never affect anything this table
+        // measures.
+        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, false);
         const exe_bytes = try container.writeHunkExecutable(arena, container_bytes, image.mem_chip);
         const ratio = @as(f64, @floatFromInt(exe_bytes.len)) / @as(f64, @floatFromInt(input_bytes.len)) * 100.0;
 
