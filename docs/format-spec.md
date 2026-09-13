@@ -6,6 +6,15 @@ real emulated 68k hardware (`tests/uae/`) as well as host-side unit
 tests. §9's versioning policy is now live: a change to anything a stub
 *must* understand needs a `version_major` bump, not a silent edit here.
 
+Post-v1.0, §2's on-disk shape and §8's runtime algorithm were revised
+(the two-hunk, free-the-scratch-hunk redesign - `docs/memory-lifecycle.md`)
+without a `version_major` bump: §3's 32-byte header layout, the actual
+thing a stub must understand per §9's own policy, did not change at all -
+only the outer container shape and the runtime code around it did, and
+execram always produces files with whatever stub its current build
+embeds, so there's no old-file/new-reader compatibility question the
+policy exists to guard.
+
 ## 1. Two-layer model
 
 execram deliberately separates two concerns that Shrinkler couples
@@ -30,36 +39,56 @@ hold the shared reloc-fixup routine every backend's stub calls into).
 
 ## 2. On-disk shape
 
-A packed executable is a plain, single-hunk AmigaDOS load file:
+A packed executable is a **two**-hunk AmigaDOS load file (see
+[docs/memory-lifecycle.md](memory-lifecycle.md) for why: hunk 1 is scratch
+space the stub frees once decompression finishes, rather than a whole
+hunk that stays resident for the process's entire life):
 
 ```
-HUNK_HEADER   (one hunk, size = ceil(total below / 4) longwords,
-               MEMF_CHIP requested iff header.flags bit 0 is set)
-HUNK_CODE     stub code ++ execram header ++ compressed payload
-              (padded to a longword boundary, as the hunk format requires)
+HUNK_HEADER   two hunks:
+                hunk 0: size = the resident image's own allocation size
+                        (§8 - code_data_size + max(bss_size,
+                        reloc_stream_size), rounded up to a longword),
+                        MEMF_CHIP requested iff header.flags bit 0 is set
+                hunk 1: size = ceil((stub code ++ execram header ++
+                        compressed payload) / 4) longwords, always
+                        MEMF_ANY regardless of hunk 0's own memory type
+                        (it's freed long before anything would need it
+                        to be addressable from Chip-RAM-only DMA)
+HUNK_CODE     hunk 0's body: stubs/common/trampoline.s, a small, fixed,
+              backend-agnostic binary - AmigaDOS's LoadSeg jumps here
+              directly. Far smaller than hunk 0's own declared size; the
+              rest is uninitialized until hunk 1's stub decompresses
+              into it (§8) - legal (confirmed against real hardware,
+              see §8's own ABI note), not a hunk-format quirk.
+HUNK_END
+HUNK_CODE     hunk 1's body: stub code ++ execram header ++ compressed
+              payload (padded to a longword boundary)
 HUNK_END
 ```
 
-No `HUNK_RELOC32` at all: the stub is pure position-independent code
-(PC-relative branches/references only; the only absolute addresses it
+No `HUNK_RELOC32` at all: both hunks are pure position-independent code
+(PC-relative branches/references only; the only absolute addresses either
 uses are genuine fixed hardware register addresses, e.g. the custom chip
 base at `$dff000`, which are not relocatable program addresses). This was
 proven out in the `tests/uae` boot-block stub — see
 [sentinel.s](../tests/uae/boot/sentinel.s).
 
-The **execram header is not part of the assembled stub binary.** The stub
-is a fixed, pre-assembled blob embedded into the host tool at Zig-build
-time (see `build.zig`) and reused unchanged across every packed output —
-so per-file parameters (sizes, backend choice, ...) can never be patched
+The **execram header is not part of the assembled stub binary** - it lives
+in hunk 1, right after the stub's own code. The stub is a fixed,
+pre-assembled blob embedded into the host tool at Zig-build time (see
+`build.zig`) and reused unchanged across every packed output — so
+per-file parameters (sizes, backend choice, ...) can never be patched
 into stub instructions the way a per-file-assembled stub could. Instead
 they're *data* the stub reads at runtime, exactly like Shrinkler's own
 `ShrinklerDecompress.S` reads its `shr_*` header fields (see
 `docs/LICENSES.md` §1b for that reference). The host tool's job when
-producing an output file is: `stub_bytes ++ header_bytes ++ payload_bytes`,
+producing hunk 1 is: `stub_bytes ++ header_bytes ++ payload_bytes`,
 contiguous, with the stub locating the header via a PC-relative reference
 to a label at the very end of its own code — so the assembled stub
-binary's length **is** the header's offset within the hunk, by
-construction.
+binary's length **is** the header's offset within hunk 1, by
+construction. Hunk 0's own trampoline needs no such lookup: it carries no
+header-aware logic at all (§8).
 
 ## 3. Header layout
 
@@ -83,9 +112,15 @@ fields start at a 4-byte-aligned offset.
 
 Header size in v0: 32 bytes.
 
-The **resident image size** (what actually needs to stay in memory once
-the program is running) is `code_data_size + bss_size`, computed, not
-stored — there's no field for it.
+The **resident image size** (what the running program itself actually
+uses) is `code_data_size + bss_size`, computed, not stored — there's no
+field for it. This is *not* the same number as hunk 0's own declared/
+allocated size (§2, §8), which must additionally cover
+`reloc_stream_size` when that's larger than `bss_size` (Depack writes
+`code_data_size + reloc_stream_size` bytes into hunk 0, before BSS is
+re-cleared over the same trailing region) — the difference, if any, is
+harmless trailing padding within hunk 0's own memory, never read by the
+running program.
 
 By convention, **the flattened program's entry point is always offset 0**
 of the resident image. `flatten.zig` (M1) must guarantee this; there's no
@@ -106,7 +141,7 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 
 | Bit | Name | Meaning when set |
 |----:|------|-------------------|
-| 0   | `MEM_CHIP` | Allocate the resident image in Chip RAM (`MEMF_CHIP`). Clear means `MEMF_ANY` — a binary choice, decided by `execram pack` from the original executable's own hunk memory attributes (any hunk requesting Chip RAM sets it for the whole merged image) and overridable via `--mem=chip\|fast` (`src/main.zig`, `container.zig`'s `mem_chip` field). |
+| 0   | `MEM_CHIP` | Allocate hunk 0 (the resident image, §2) in Chip RAM (`MEMF_CHIP`). Clear means `MEMF_ANY` — a binary choice, decided by `execram pack` from the original executable's own hunk memory attributes (any hunk requesting Chip RAM sets it for the whole merged image) and overridable via `--mem=chip\|fast` (`src/main.zig`, `container.zig`'s `mem_chip` field). Only hunk 0 is affected either way — hunk 1 (the scratch stub+header+payload hunk) is always plain `MEMF_ANY`, regardless of this bit, since it's freed long before decompression is done and never needs Chip-RAM addressability itself. |
 | 1   | `HAS_RELOCS` | A reloc stream follows the code+data in the decompressed payload (§6). If clear, `reloc_stream_size` must be 0 and the fixup pass is skipped entirely. |
 | 2   | `FLASH` | Purely cosmetic, no effect on decoding: the stub sets `COLOR00` (the background/border colour register, `$dff180`) to a fixed bright colour immediately before calling the backend's `Depack:`, and restores it to black immediately after — a visible "something is happening" indicator for slow backends on real hardware, where a large file can otherwise sit at a blank screen for tens of seconds with no sign the machine hasn't hung. Set by `execram pack --flash`. |
 | 3-7 | *(reserved)* | Must be 0 in v0. A stub must ignore reserved bits it doesn't understand rather than reject the file — only a `version_major` bump means "you must understand this to run me correctly." |
@@ -159,71 +194,81 @@ executables to check whether it matters in practice.
 
 See [docs/memory-lifecycle.md](memory-lifecycle.md) for a phase-by-phase
 account of what's resident in memory and where, complementing the
-step-by-step algorithm below.
+step-by-step algorithm below, and for the full history of how this
+design reached its current shape.
 
-The stub, on entry (position-independent, no relocation needed for
-itself):
+The stub is split across both hunks (§2). **AmigaDOS's `LoadSeg` jumps
+straight into hunk 0** - `stubs/common/trampoline.s`, identical for every
+backend:
 
-1. Locate the header via a PC-relative reference to the label right after
-   its own code (§2). Check `magic` and `version_major`; if either is
-   wrong, there's nothing sensible to do (v0 doesn't define recovery
-   behavior — there's only one major version so far).
-2. `final = AllocMem(code_data_size + max(bss_size, reloc_stream_size), MEMF_CLEAR | chip_flag)`.
-   One allocation, not two (see below for why that used to be two and
-   isn't anymore) — sized to hold whichever tail is larger: the real
-   BSS the program needs at runtime, or the reloc stream the next step
-   still has to read (they occupy the same trailing region, just at
-   different times — the reloc stream is fully consumed by step 4
-   before anything cares what "BSS" actually contains there).
-3. Call the backend's depack routine: input = the compressed payload
-   (still sitting in the currently-loaded hunk, right after the header),
-   output = `final`, directly. This is the only backend-specific step.
-4. If `flags` bit 1 is set, walk the reloc stream (the trailing
+1. Compute its own runtime address via a PC-relative reference (this
+   *is* hunk 0's own data start - call it `final`, since it's also where
+   the resident image ends up and the eventual entry point). No header
+   lookup, no backend awareness needed here at all.
+2. Read the longword at `final - 4` (hunk 0's own chain-pointer field,
+   written by `LoadSeg` - see the ABI note below), left-shift it by 2 to
+   undo its BCPL encoding, and jump to that address **+ 4** - hunk 1's
+   own data start.
+
+Control now reaches hunk 1's code (`stubs/common/runtime.i`'s `Start:`,
+or `stubs/inflate/runtime_std.i`'s for inflate/zultra), with `final`
+(hunk 0's base) already in a register:
+
+3. Locate the header via a PC-relative reference to the label right
+   after hunk 1's own stub code (§2). Check `magic` and `version_major`;
+   if either is wrong, there's nothing sensible to do (v0 doesn't define
+   recovery behavior — there's only one major version so far).
+4. No allocation: `final` already points at hunk 0's own memory,
+   sized and typed by `LoadSeg` itself before any of this ran (§2).
+5. Call the backend's depack routine: input = the compressed payload
+   (in hunk 1, right after the header), output = `final`, directly.
+   This is the only backend-specific step.
+6. If `flags` bit 1 is set, walk the reloc stream (the trailing
    `reloc_stream_size` bytes of `final`, right after `code_data_size`)
    and, for each decoded offset, add `final`'s runtime address to the
    longword at `final + offset`.
-5. Clear `final[code_data_size .. code_data_size + bss_size]` again,
-   unconditionally. Step 3 wrote `code_data_size + reloc_stream_size`
+7. Clear `final[code_data_size .. code_data_size + bss_size]` again,
+   unconditionally. Step 5 wrote `code_data_size + reloc_stream_size`
    bytes there (code_data followed by the reloc stream, if any), which
    only fills that region with zero when `reloc_stream_size >=
    bss_size` — whenever the reloc stream is the *shorter* of the two
    (the common case), its tail leaves leftover reloc-stream bytes sitting
-   where the program's BSS needs to be all-zero at entry. `AllocMem`'s
-   own `MEMF_CLEAR` doesn't help here either: it only zeroed this region
-   *before* steps 3–4 wrote all over it. `bss_size` is always a multiple
-   of 4 (hunk sizes are stored in longwords), so this is a plain
-   longword-clear loop.
-6. Jump to `final + 0`.
+   where the program's BSS needs to be all-zero at entry. `bss_size` is
+   always a multiple of 4 (hunk sizes are stored in longwords), so this
+   is a plain longword-clear loop.
+8. Detach hunk 1 from hunk 0's own chain-pointer field (`clr.l` it, so
+   `LoadSeg`'s bookkeeping doesn't try to free hunk 1 a second time at
+   process exit), then `FreeMem` hunk 1 - its own total size, recorded
+   at *its* data-start-minus-8 by `LoadSeg`, is read back directly, no
+   separate size tracking needed.
+9. Jump to `final + 0`.
 
-**This replaced an earlier two-allocation version** (`scratch =
-AllocMem(code_data_size + reloc_stream_size, MEMF_ANY)`, depack into
-`scratch`, `final = AllocMem(code_data_size + bss_size, MEMF_CLEAR)`,
-copy `scratch`'s first `code_data_size` bytes to `final`, fix up
-`final`, `FreeMem(scratch, ...)`, jump). That version was simple and
-obviously correct, but genuinely ran out of memory on real, memory-
-constrained hardware: the original loaded hunk (this stub + header +
-compressed payload) is never freed — it's the process's own code
-segment for its whole lifetime, not memory under our control — so at
-the moment `final` was allocated but `scratch` not yet freed, all
-three had to fit in memory simultaneously. Confirmed directly on a
-real 221KB program packed with zultra: a peak of ~564KB (144KB packed
-+ 216KB scratch + 218KB final), comfortably over a base Amiga's entire
-512KB before Kickstart's own overhead - it packed and self-checked
-fine on the host, and even decompressed correctly under emulation, but
-had nowhere to get to on an actual 512KB machine. The one-allocation
-version above needs ~354KB instead for the same file (the packed
-image plus one buffer, not two), by decompressing straight into the
-buffer that becomes the resident image instead of a separate one that
-gets thrown away.
+**ABI this depends on** (confirmed empirically under real FS-UAE across
+Kickstart v1.3 r34.005/v2.05 r37.350/v3.1 r40.063, not assumed from
+documentation - see the commit that introduced this design for the probe
+and raw results): every hunk `LoadSeg` loads carries an 8-byte header
+immediately before its own data - that hunk's own total `AllocMem`'d size
+in bytes (already including this 8-byte header, exactly what `FreeMem`
+needs) at `data_start - 8`, and a BCPL-shifted pointer to the next hunk's
+own "+4" field (0 if none) at `data_start - 4`.
+
+Hunk 0's own declared/allocated size (§2, §3) must be
+`code_data_size + max(bss_size, reloc_stream_size)`, not just
+`code_data_size + bss_size` - step 5 writes the larger of the two into
+`final`'s tail, and undersizing the allocation lets it overflow into
+whatever comes right after hunk 0 in memory (hunk 1, until step 8 frees
+it - a real bug once, caught only by a synthetic test program whose
+`reloc_stream_size` happened to exceed its `bss_size`, since every real
+executable tried before it had `bss_size` dominate and masked the
+overflow completely).
 
 This isn't full in-place/overlapping decompression the way Shrinkler's
 own `OverlapHeader.S` does it (compressed and decompressed data sharing
 even the *same* bytes, needing a backend-specific worst-case expansion
 bound to prove it's always safe) - `safety_margin` remains reserved
-and pinned to 0 for that reason. It's a narrower, always-safe
-simplification: the compressed payload and the buffer being decompressed
-into never overlap (the payload stays in the original hunk throughout),
-only the *two post-decompression allocations* got merged into one.
+and pinned to 0 for that reason. Hunk 1 (still holding the compressed
+payload) and `final` (hunk 0) are always two disjoint memory regions;
+Depack reads from one and writes to the other, never overlapping.
 
 ## 9. Versioning policy
 
@@ -245,10 +290,20 @@ safely ignore (a newly-meaningful reserved flag bit, say).
   found; §7 stands as originally specified.
 - ~~The two-allocation runtime scheme (§8) can exceed memory on a base
   512KB Amiga even for programs much smaller than that~~ — fixed: the
-  two post-decompression allocations (`scratch`, `final`) are merged
-  into one (§8). True overlap-in-place decompression (compressed and
-  decompressed data sharing the *same* bytes, not just one merged
-  post-decompression buffer) remains open - it needs a proven
+  two post-decompression allocations (`scratch`, `final`) were merged
+  into one, then that single-allocation scheme was itself replaced by
+  the current two-hunk design below.
+- ~~The loaded hunk (stub+header+compressed payload) is never freed,
+  costing the packed file's own compressed size as permanent dead
+  weight for the program's entire life~~ — fixed: adopted Shrinkler's
+  own default-mode design (`docs/memory-lifecycle.md`'s "Comparison"
+  section) instead of a single loaded hunk. The container is now two
+  hunks (§2); hunk 1 (stub+header+payload) is freed once decompression
+  finishes (§8), leaving steady-state memory at exactly the resident
+  image size, matching Shrinkler's own default mode's result. True
+  overlap-in-place decompression (compressed and decompressed data
+  sharing the *same* bytes, the way Shrinkler's `--overlap` mode does
+  it, rather than two disjoint hunks) remains open - it needs a proven
   safety-margin formula per backend before it can ship; each backend's
   `docs/algorithm-notes/` entry should derive one when ready.
 - CPU-tiered stubs (68000 vs. 68020+), noted as an open question in
@@ -257,4 +312,13 @@ safely ignore (a newly-meaningful reserved flag bit, say).
   not a header change.
 - Whether `MEM_CHIP`'s all-or-nothing merge (§5) ever needs a per-region
   escape hatch — deferred until a real program with mixed chip/fast
-  hunks makes it a concrete problem rather than a theoretical one.
+  hunks makes it a concrete problem rather than a theoretical one. (The
+  two-hunk redesign already fixed the narrower version of this that
+  applied to hunk 1 itself - it's now always `MEMF_ANY`, never forced
+  into Chip RAM alongside hunk 0.)
+- Whether `CacheClearU` (a 68020+ instruction-cache flush before jumping
+  into freshly-decompressed code, skipped on plain 68000s) is a real gap
+  on real 68020+ hardware - Shrinkler's own default and `--overlap`
+  decrunch headers both do this, execram's runtime never does
+  (`docs/memory-lifecycle.md`'s "Comparison" section) - not yet
+  investigated.

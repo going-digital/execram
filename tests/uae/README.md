@@ -90,7 +90,7 @@ jumps to it.
 The test program only prints its sentinel correctly if a pointer that
 went through both relocations ends up correct - this is a real
 functional check of decompress+allocate+relocate+jump, not just "did it
-not crash". Three real bugs surfaced during development, all only
+not crash". Five real bugs surfaced during development, all only
 catchable by actually booting a packed program (the bare sentinel test,
 with no header/payload/stub involved, couldn't have caught any of them):
 
@@ -127,6 +127,32 @@ with no header/payload/stub involved, couldn't have caught any of them):
   container header fields) until the one thing not yet isolated - what
   `stub.s` itself handed the depacker - turned out to be the bug. See
   `stubs/shrinkler/stub.s`'s own comment.
+- The two-hunk redesign (`docs/memory-lifecycle.md`) needed a rewritten
+  `loader.s` that parses the real hunk file and reconstructs `LoadSeg`'s
+  own memory layout by hand (this scheme fundamentally depends on a real
+  hunk chain existing, which the previous bare-metal loader never built).
+  Its `AllocHunk` subroutine calls the real `EXEC_AllocMem`, standard
+  Amiga library code free to clobber A0/A1/D0/D1 like any other LVO
+  call - A0 (the loader's own read position in the scratch disk-read
+  buffer) was never saved across it, so both reconstructed hunks' bodies
+  came back all-zero (`MEMF_CLEAR`'s own fill, untouched) instead of
+  their real copied bytes. Found by dumping the constructed hunks' own
+  memory over serial right before the final jump. Fixed by saving/
+  restoring A0 around both call sites.
+- The same redesign also exposed a genuine bug in the shipped runtime
+  itself, not just the test loader: hunk 0's declared/allocated size
+  only accounted for `code_data_size + bss_size`, not `code_data_size +
+  max(bss_size, reloc_stream_size)` as `Depack` actually needs - when
+  `reloc_stream_size` exceeds `bss_size`, `Depack` overflows hunk 0 into
+  hunk 1's own header, corrupting the size field its later `FreeMem`
+  call reads. Every real executable tried before this test program
+  (`tests/corpus/hexagon.exe` included) happened to have `bss_size`
+  dominate, masking the bug completely - only this program's own tiny
+  profile (0 bytes BSS, a 3-byte reloc stream) exposed it. Found by
+  bisecting with serial checkpoints inside the actual embedded stub code
+  (not just `loader.s`) until the exact point between "before `Depack`"
+  and "after `Depack`" where hunk 1's own header field changed from
+  correct to corrupted. Fixed in `main.zig`'s `hunk0Size()` helper.
 
 ## Larger-scale end-to-end test (`run_large_e2e_test.sh`)
 

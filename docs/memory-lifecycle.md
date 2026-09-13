@@ -3,72 +3,93 @@
 A phase-by-phase account of what's resident in memory, and where, between
 AmigaDOS finishing `LoadSeg` on a packed executable and the stub jumping
 into the decompressed program. Complements `docs/format-spec.md` §8 (the
-runtime algorithm itself, and the history of why it looks like this) -
-this page is about the *memory*, not the instructions: what exists, where,
-for how long, and what (if anything) is ever freed.
+runtime algorithm itself) - this page is about the *memory*, not the
+instructions: what exists, where, for how long, and what (if anything) is
+ever freed.
 
-The short version: **one `AllocMem` call, zero `FreeMem` calls, two
-buffers resident at once, for the entire run.** No third buffer, no
-in-place overlap, nothing ever reclaimed before the jump.
+The short version: **AmigaDOS's own `LoadSeg` does every allocation - the
+runtime itself makes none at all.** Two hunks are resident throughout
+decompression; the second is freed by the stub's own code the moment it's
+no longer needed, leaving exactly one hunk - the running program itself -
+resident for the rest of the process's life.
 
-## The two buffers
+## The two hunks
 
 | | What it is | Who allocated it | When it goes away |
 |---|---|---|---|
-| **The loaded hunk** | stub code ++ execram header ++ still-compressed payload (`docs/format-spec.md` §2) | AmigaDOS itself, via `LoadSeg`, before the stub's first instruction ever runs | Never, while the process is alive - it's the process's own code segment, not memory execram controls (see "What never happens" below) |
-| **`final`** | the decompressed, relocated, resident program image | the stub, one `AllocMem` call (`stubs/common/runtime.i`) | Never, while the process is alive - it *becomes* the running program, there's nothing to free it into |
+| **Hunk 0** (`final`) | the decompressed, relocated, resident program image | `LoadSeg`, before the trampoline's first instruction ever runs | Never, while the process is alive - it *becomes* the running program |
+| **Hunk 1** | stub code ++ execram header ++ still-compressed payload (`docs/format-spec.md` §2) | `LoadSeg`, at the same time as hunk 0 | Freed by hunk 1's own code, once decompression finishes (see "What never happens" below) |
 
-Both are real, simultaneously-resident allocations for the stub's entire
-run and for the rest of the program's life afterward. There is never a
-third buffer - see "Not true in-place decompression" below for how that
-differs from what a `safety_margin`-based scheme would need.
+Both are real, simultaneously-resident allocations for the whole time
+decompression takes. There is never a third buffer - see "Not true
+in-place decompression" below for how that differs from what a
+`safety_margin`-based scheme would need.
 
 ## Phase by phase
 
-**0. Before `Start:` runs.** AmigaDOS has just finished `LoadSeg`-ing the
-packed executable. The only memory in this picture is the loaded hunk -
-the whole file, stub and header and compressed payload together, exactly
-as written to disk (padded to a longword, `docs/format-spec.md` §2).
-`final` doesn't exist yet; nothing has been allocated by the stub at all.
+**0. Before the trampoline runs.** AmigaDOS's `LoadSeg` has just finished
+allocating *both* hunks and linking them together - hunk 0's own
+chain-pointer field points at hunk 1 (`docs/format-spec.md` §8's own ABI
+note) - exactly like loading any other multi-hunk file, nothing
+execram-specific about it yet. Hunk 0 is freshly allocated but not
+necessarily zeroed beyond whatever `LoadSeg` happened to leave there -
+nothing later depends on it starting zeroed (see step 4). Hunk 1 holds
+the real file bytes: stub code, header, and compressed payload, exactly
+as packed.
 
-**1. `AllocMem` (format-spec §8 step 2).** The stub computes one size,
-`code_data_size + max(bss_size, reloc_stream_size)`, and makes one
-`AllocMem` call, `MEMF_CLEAR` and optionally `MEMF_CHIP`
-(`stubs/common/runtime.i`'s `Start:`). This is the only allocation that
-ever happens. `final` now exists, freshly zeroed, at a fresh address
-disjoint from the loaded hunk - the two never overlap in v0 (see below).
-This is also the moment of **peak memory use**: both buffers are resident
-from here until the jump, and nothing gets smaller or goes away before
-then.
+**1. The trampoline (`stubs/common/trampoline.s`), hunk 0's own entry
+point.** `LoadSeg` jumps here directly - this is the whole packed file's
+entry point. It computes its own address (`final` - this label *is* hunk
+0's data start), reads hunk 0's own chain-pointer field to find hunk 1,
+and jumps into hunk 1's own code with `final` held in a register. This is
+the **only** point where the two hunks are connected explicitly -
+everything from here on just treats `final` as a plain address handed
+in, not something to rediscover.
 
-**2. `Depack` (step 3).** The backend's depacker reads the compressed
-payload from the loaded hunk (right after the header) and writes
-`code_data_size + reloc_stream_size` decompressed bytes directly into
-`final`, starting at offset 0. No intermediate buffer: whatever the
-backend decodes lands in `final` immediately, in its final resident
-position. The loaded hunk is only ever *read* here, never written.
+**2. `Start:` entry (`stubs/common/runtime.i` / `stubs/inflate/
+runtime_std.i`).** Locates the header via its own PC-relative lookup
+(within hunk 1's own data, unrelated to `final`). Checks `magic`/
+`version_major`. **No allocation happens here, or anywhere else in the
+runtime** - `final` already points at real, correctly-sized,
+correctly-typed memory, decided entirely by what `LoadSeg` did before any
+of this ran.
 
-**3. `RelocFixup` (step 4), if `flags` bit 1 is set.** By this point
-`final` is self-contained: the reloc stream `Depack` just wrote to
-`final`'s tail (`final + code_data_size`) is read back out of `final`
-itself to patch longwords earlier in `final`'s own `code_data` region
-(`stubs/common/runtime.i`'s `RelocFixup`). The loaded hunk isn't touched
-at all in this step - by now it holds nothing anything still needs.
+**3. `Depack`.** The backend's depacker reads the compressed payload from
+hunk 1 (right after the header) and writes `code_data_size +
+reloc_stream_size` decompressed bytes directly into `final` (hunk 0),
+starting at offset 0. No intermediate buffer: whatever the backend
+decodes lands in `final` immediately, in its final resident position.
+Hunk 1 is only ever *read* here, never written.
 
-**4. BSS re-clear (step 5).** `final`'s tail - the same bytes that just
-held the reloc stream - gets zeroed again, unconditionally, because that
-region is also the program's real BSS and it must start at zero
-(`stubs/common/runtime.i`'s own comment on why `AllocMem`'s `MEMF_CLEAR`
-alone isn't enough: it only zeroed this region *before* steps 2-3 wrote
-over it). This is the one point where `final`'s own tail changes meaning
-mid-flight - see the diagram below.
+**4. `RelocFixup`, if `flags` bit 1 is set.** By this point `final` is
+self-contained: the reloc stream `Depack` just wrote to `final`'s tail
+(`final + code_data_size`) is read back out of `final` itself to patch
+longwords earlier in `final`'s own `code_data` region. Hunk 1 isn't
+touched at all in this step.
 
-**5. `jmp (a4)` (step 6) - and after.** Control passes to `final + 0`,
-the payload's own entry point. `final` is now simply the running
-program's resident image; nothing about it changes at handoff. The loaded
-hunk, however, **is still sitting in memory, unfreed, and stays there for
-the rest of the process's life** - the running program never reads it
-again, but nothing ever gives it back either. See below.
+**5. BSS re-clear.** `final`'s tail - the same bytes that just held the
+reloc stream - gets zeroed again, unconditionally, because that region is
+also the program's real BSS and it must start at zero. This step makes no
+assumption about what was in that memory beforehand, not even that
+`LoadSeg` zeroed hunk 0's own allocation in the first place (step 0) -
+whatever was there, real or leftover reloc-stream bytes, gets overwritten
+with zero here regardless.
+
+**6. Detach and free hunk 1.** Hunk 0's own chain-pointer field is
+cleared (so `LoadSeg`'s bookkeeping doesn't try to free hunk 1 a second
+time when the process eventually exits), then hunk 1 is `FreeMem`'d -
+its own recorded total size, read back from its own data-start-minus-8,
+needs no separate tracking anywhere. **This is the one point in the whole
+run where anything is freed**, and it's the entire reason this design
+exists: unlike the single-hunk scheme it replaced, hunk 1 (the compressed
+file bytes, now fully consumed) doesn't have to sit in memory for the
+rest of the process's life.
+
+**7. `jmp final+0` - and after.** Control passes to the payload's own
+entry point. `final` (hunk 0) is now simply the running program's
+resident image; nothing about it changes at handoff. Hunk 1 no longer
+exists at all - `FreeMem` returned its memory to Exec's free pool in the
+previous step.
 
 ## `final`'s tail means two different things at two different times
 
@@ -78,96 +99,105 @@ again, but nothing ever gives it back either. See below.
   |       code + data       |         tail region            |
   |------------------------|-------------------------------|
 
-  after AllocMem  (step 1): zero (MEMF_CLEAR)      zero
-  after Depack    (step 2): final code/data        reloc stream (reloc_stream_size bytes) +
-                                                    zero padding out to bss_size, if bss_size is larger
-  after RelocFixup(step 3): patched in place        unchanged (already consumed)
-  after BSS clear (step 4): unchanged              zero again - now genuinely BSS
+  after LoadSeg   (step 0): uninitialized (whatever    uninitialized
+                            LoadSeg happened to leave)
+  after Depack    (step 3): final code/data            reloc stream (reloc_stream_size bytes) +
+                                                        whatever was already there, out to bss_size,
+                                                        if bss_size is larger
+  after RelocFixup(step 4): patched in place            unchanged (already consumed)
+  after BSS clear (step 5): unchanged                  zero - now genuinely BSS
 ```
 
 The tail region is sized to whichever of `bss_size` or `reloc_stream_size`
-is larger, because it plays both roles in turn, never at the same time:
-first it's scratch space for a reloc stream that gets fully consumed, then
-it's the program's own BSS. `docs/format-spec.md` §8 has the full
-step-by-step; this is the same fact, viewed as data rather than as code.
-
-## Chip RAM: both buffers share one decision
-
-The `MEM_CHIP` flag (`docs/format-spec.md` §5) drives *two* independent
-requests for the same memory type, not one:
-
-- The loaded hunk's own memory type is decided at `LoadSeg` time by the
-  `HUNK_HEADER`'s size-longs field, which `container.zig`'s
-  `writeHunkExecutable` sets `MEMF_CHIP_BIT` on whenever `mem_chip` is
-  true - AmigaDOS itself honors this when it allocates memory for the
-  hunk it's about to load, before the stub's first instruction runs.
-- `final`'s `AllocMem` call (`stubs/common/runtime.i`) separately ORs in
-  `MEMF_CHIP` from the *same* header flag bit.
-
-So a Chip-RAM-requiring program doesn't just cost more total memory while
-packed - both the still-resident loaded hunk *and* `final` compete for
-the same, much smaller Chip RAM pool at once, for the program's whole
-life. This is a direct consequence of the "no separate per-region memory
-type" limitation `docs/format-spec.md` §5 already documents; it's worth
-knowing it applies to the loaded hunk too, not just the resident image.
+is larger (`docs/format-spec.md` §8's own note on why undersizing it lets
+`Depack` overflow into hunk 1), because it plays both roles in turn, never
+at the same time: first it's scratch space for a reloc stream that gets
+fully consumed, then it's the program's own BSS. Unlike the earlier
+single-allocation scheme (see "History" below), nothing here ever relies
+on `MEMF_CLEAR` - there isn't an `AllocMem` call to request it from in the
+first place, and step 5's unconditional clear was already written to make
+no assumption about prior state, so the design didn't need to change when
+`AllocMem` went away entirely.
 
 ## What never happens
 
-- **No `FreeMem` call exists anywhere in the current runtime.** `final`
-  is allocated once and never freed by the stub - there's nothing to free
-  it *into*, since it becomes the running program. (An earlier,
-  since-replaced version of this runtime *did* call `FreeMem` once, on a
-  now-removed second allocation - see "History" below. That allocation no
-  longer exists, and the current runtime has no `FreeMem` call at all.)
-- **The loaded hunk is never freed either, by anything, ever, while the
-  process runs.** This isn't a missed optimization - a running AmigaDOS
-  process's own code segment isn't something the process can free itself;
-  DOS reclaims it only when the process's seglist is unloaded, normally
-  at process exit. This was already true even under the old
-  two-allocation scheme (only the scratch buffer was ever freed, never
-  the loaded hunk) - see `stubs/common/runtime.i`'s own comment.
+- **No `AllocMem` call exists anywhere in the runtime.** `LoadSeg` is the
+  only allocator, for both hunks, before either the trampoline's or
+  `Start:`'s first instruction ever runs.
+- **Hunk 0 (`final`) is never freed.** There's nothing to free it *into*
+  - it becomes the running program.
+- **Hunk 1 *is* freed - the one `FreeMem` call in the whole runtime**,
+  once decompression, relocation, and the BSS re-clear are all done with
+  it (step 6). This is the one respect in which the current design
+  differs from a strict "nothing is ever freed" reading of an earlier
+  version of this page - see "History".
 - **No third buffer ever exists.** `Depack` writes straight into `final`;
   there is no separate decompression-scratch area at any point.
 
-One real, permanent consequence follows from the first two points
-together: **an execram-packed program costs its own compressed file size
-as dead weight for its entire run**, on top of the resident image size -
-memory a plain, unpacked executable would never have spent at all. This
-is the price of compression; the runtime doesn't hide it, it just keeps
-that cost to exactly one extra buffer (the loaded hunk itself), not two.
+The real, permanent consequence that follows: **an execram-packed
+program's steady-state memory, once running, is exactly its resident
+image size** - the compressed file's own bytes (hunk 1) are reclaimed,
+not carried as dead weight for the rest of the process's life. This
+wasn't always true (see "History") and matches what Shrinkler's own
+default decrunch header already does (see "Comparison" below).
 
 ## Not true in-place decompression
 
-The loaded hunk (still holding the compressed payload) and `final` are
-always two disjoint memory regions in v0 - `Depack` reads from one and
-writes to the other, never the same address twice for different reasons.
-This is *not* the same thing as Shrinkler's own `OverlapHeader.S`-style
-overlapping decompression, where the compressed and decompressed data
-share the very same bytes and a backend-specific worst-case expansion
-bound has to prove that's always safe. `safety_margin`
-(`docs/format-spec.md` §3) stays reserved and pinned to 0 for exactly
-this reason - v0 doesn't need it, because it never overlaps anything.
-`docs/format-spec.md` §10 tracks true overlap-in-place decompression as a
-separate, still-open item.
+Hunk 1 (still holding the compressed payload, until step 6 frees it) and
+`final` (hunk 0) are always two disjoint memory regions - `Depack` reads
+from one and writes to the other, never the same address twice for
+different reasons. This is *not* the same thing as Shrinkler's own
+`OverlapHeader.S`-style overlapping decompression, where the compressed
+and decompressed data share the very same bytes and a backend-specific
+worst-case expansion bound has to prove that's always safe.
+`safety_margin` (`docs/format-spec.md` §3) stays reserved and pinned to 0
+for exactly this reason - the current design doesn't need it, because it
+never overlaps anything. `docs/format-spec.md` §10 tracks true
+overlap-in-place decompression as a separate, still-open item.
 
-## History: why this used to be three buffers, briefly, and no longer is
+## History: from one loaded hunk that's never freed, to two hunks and one `FreeMem` call
 
-The current single-`AllocMem` design replaced an earlier version that
-allocated `final` and a separate `scratch` buffer (for `Depack`'s output,
-before a copy-and-fixup pass moved it into `final`), then freed `scratch`.
-That version was simpler to read but, for a brief window, needed **three**
-buffers resident simultaneously - the loaded hunk, `scratch`, and
-`final` - because the loaded hunk is never freed (see above) and
-`scratch` couldn't be freed until after `final` was already allocated and
-filled. On a real 221KB program packed with `zultra`, that peak reached
-~564KB (144KB loaded hunk + 216KB scratch + 218KB final), safely over a
-base 512KB Amiga's *entire* memory even though the packed file itself was
-well under 512KB - confirmed by a real hardware crash report, root-caused
-and fixed in the commit that removed `scratch` entirely. The full
-before/after story, with the exact numbers, lives in
-`docs/format-spec.md` §8 and that commit's own message
-(`git log --oneline --grep="512KB"` finds it) - this page describes only
-the current, shipped design.
+The current design is the second replacement of an original scheme, in
+two steps:
+
+**Two allocations to one (single-hunk era).** The stub originally
+allocated a `scratch` buffer for `Depack`'s raw output, copied it into a
+separately-allocated `final`, fixed up `final`, then freed `scratch`.
+Simple and obviously correct, but it genuinely ran out of memory on real,
+memory-constrained hardware: the packed file's own loaded hunk (stub +
+header + compressed payload, back when it was a single hunk) was never
+freed - it was the process's own code segment for its whole lifetime, not
+memory under the runtime's control - so at the moment `final` was
+allocated but `scratch` not yet freed, all three had to fit in memory
+simultaneously. Confirmed directly on a real 221KB program packed with
+`zultra`: a peak of ~564KB (144KB loaded hunk + 216KB scratch + 218KB
+final), comfortably over a base Amiga's entire 512KB before Kickstart's
+own overhead - it packed and self-checked fine on the host, and even
+decompressed correctly under emulation, but had nowhere to get to on an
+actual 512KB machine. Merging the two post-decompression allocations into
+one (`scratch` and `final` combined, `Depack` writing straight into what
+becomes `final`) fixed the immediate crash - `git log --oneline
+--grep="512KB"` finds that commit - but the single loaded hunk itself
+still stayed resident and unfreed for the packed program's entire life,
+carrying its own compressed size as permanent dead weight.
+
+**One loaded hunk to two hunks, one of them freed (current).** Reading
+Shrinkler's own default decrunch header (see "Comparison" below) directly
+suggested the fix: don't rely on a single AmigaDOS-loaded hunk holding
+everything - split the packed file into two hunks instead, let `LoadSeg`
+allocate both, and free the one that turns out to be pure scratch once
+decompression is done. The ABI this depends on (how `LoadSeg` links and
+sizes hunks in memory) was confirmed empirically under real FS-UAE across
+three Kickstart versions before any code was written against it - see
+`docs/format-spec.md` §8's own ABI note - and the redesign itself
+surfaced one further latent bug in the process: hunk 0's own declared
+size needs `max(bss_size, reloc_stream_size)`, not just `bss_size` (the
+same fact the single-allocation era's own tail-sizing already knew, but
+one that got dropped when translating "how big to `AllocMem`" into "how
+big to declare hunk 0" - masked by every real test program tried before
+it happening to have `bss_size` dominate). This page and
+`docs/format-spec.md` describe only the current, shipped design; the
+commit that introduced it has the full trail if the details matter.
 
 ## Comparison: how Shrinkler's own decrunchers handle this
 
@@ -175,11 +205,12 @@ execram vendors Shrinkler's raw LZ77+range-decoder routine
 (`stubs/shrinkler/ShrinklerDecompress.s` - `docs/algorithm-notes/shrinkler.md`)
 but not any of its three original decrunch headers, memory scheme
 included - the container, allocation, and handoff mechanics documented
-above are execram's own design throughout. Reading the real upstream
-source (`askeksa/Shrinkler` at `17cff110fcded387fe90e632805258d9c8359e94`,
-the exact commit `docs/LICENSES.md` §1 already audits) is instructive
-regardless, since it takes a structurally different approach and gets a
-better result in its default mode.
+above are execram's own design throughout, even though the current one
+now matches Shrinkler's own default mode's *result*. Reading the real
+upstream source (`askeksa/Shrinkler` at `17cff110fcded387fe90e632805258d9c8359e94`,
+the exact commit `docs/LICENSES.md` §1 already audits) directly informed
+that redesign (see "History" above), and remains instructive for how far
+past it Shrinkler's own more aggressive modes go.
 
 **Shrinkler never flattens hunks.** A crunched Shrinkler executable keeps
 the original program's exact hunk count, sizes, and per-hunk memory type,
@@ -189,7 +220,9 @@ of these - the N real hunks plus the one extra - before any of
 Shrinkler's own code runs, exactly like loading any ordinary multi-hunk
 program. There is no `AllocMem` call anywhere in any of its three decrunch
 headers (`decrunchers/Header.S`, `MiniHeader.S`, `OverlapHeader.S`) -
-`LoadSeg` itself is the only allocator, for every buffer, in every mode.
+`LoadSeg` itself is the only allocator, for every buffer, in every mode -
+the same property execram's own two-hunk design now shares, at the
+smaller scale of exactly two hunks rather than N+1.
 
 Three build-time modes, three different outcomes for that one extra hunk:
 
@@ -203,21 +236,22 @@ Three build-time modes, three different outcomes for that one extra hunk:
   by hunk, applying relocations against those now-final addresses as it
   goes. Once every hunk is done, it flushes the instruction cache
   (`CacheClearU`, skipped on plain 68000s which have none) and then -
-  **the one `FreeMem` call in the entire codebase** - frees that one
-  extra hunk before jumping into the finished program. Net effect: peak
-  memory is resident size plus one scratch hunk, same shape as execram's
-  own peak; but Shrinkler's scratch hunk gets reclaimed, so its
-  steady-state memory, once running, is the resident size alone.
-  execram's loaded hunk never does (see "What never happens" above) -
-  this is the one respect in which Shrinkler's default mode is
-  straightforwardly better than execram's current design.
+  **the one `FreeMem` call in Shrinkler's entire codebase** - frees that
+  one extra hunk before jumping into the finished program. execram's own
+  design (above) is the same shape at a smaller scale: one scratch hunk,
+  one `FreeMem` call, freed before the jump - the difference is
+  Shrinkler's trampoline lives inside a *real* program hunk it later
+  overwrites with that hunk's own decompressed content, where execram's
+  trampoline hunk (hunk 0) *is* the whole flattened image directly, since
+  execram never preserves per-original-hunk structure to begin with (§1's
+  rationale).
 - **`--mini`**: the smallest possible decrunch header, restricted to a
   single-hunk input. Its own extra hunk (decrunch code + compressed
   data) is never freed - `MiniHeader.S` contains no `FreeMem` call at
-  all. This mode ends up in the *same* situation execram is in today,
-  not a better one.
+  all. This mode ends up in the situation execram's *old*, single-hunk
+  design was in, not its current one.
 - **`--overlap`**: true in-place decompression, and the mode execram's
-  own `safety_margin` field (`docs/format-spec.md` §3, §10) already
+  own `safety_margin` field (`docs/format-spec.md` §3, §10) still
   gestures at without implementing. No shared scratch hunk exists at
   all - at pack time, `HunkFile.h`'s `verify()` actually *runs* the
   decompression for each hunk and measures the worst-case gap between
@@ -231,12 +265,16 @@ Three build-time modes, three different outcomes for that one extra hunk:
   `OverlapHeader`'s own tiny entry stub (no bulk data in it at all,
   since every real hunk now carries its own) - never freed either, but
   a few hundred bytes of decrunch code, not a whole compressed payload.
+  This remains strictly better than execram's own current design (no
+  scratch hunk needed at all, however briefly) - the still-open item
+  `docs/format-spec.md` §10 tracks.
 
 | | Extra scratch beyond the resident program | Ever freed? | Steady-state dead weight |
 |---|---|---|---|
-| execram (current) | one whole loaded hunk (stub+header+compressed payload) | never | full compressed file size, forever |
-| Shrinkler default | one extra hunk (decrunch code + whole combined bitstream) | **yes** - the one `FreeMem` call in the codebase | none |
-| Shrinkler `--mini` | one extra hunk (decrunch code + compressed data) | never | full compressed data size, forever - same category execram is in |
+| execram (current) | one hunk (stub+header+compressed payload) | **yes** - the one `FreeMem` call in the runtime | none |
+| execram (old, single-hunk) | the whole loaded hunk (stub+header+compressed payload) | never | full compressed file size, forever |
+| Shrinkler default | one extra hunk (decrunch code + whole combined bitstream) | **yes** - the one `FreeMem` call in Shrinkler's codebase | none |
+| Shrinkler `--mini` | one extra hunk (decrunch code + compressed data) | never | full compressed data size, forever |
 | Shrinkler `--overlap` | none (each hunk carries its own compressed tail) | n/a - no scratch hunk holds bulk data | a few hundred bytes (the entry stub only) |
 
 Worth flagging, found while reading this code rather than something this
@@ -244,7 +282,7 @@ page can resolve on its own: Shrinkler's default and `--overlap` modes
 both call `CacheClearU` before jumping into freshly-decompressed code,
 skipped only on plain 68000s. execram's runtime never does this. Whether
 that's a real gap on 68020+ real hardware (as opposed to moot, if freshly
-`AllocMem`'d memory is never already sitting in an instruction cache to
+allocated memory is never already sitting in an instruction cache to
 begin with) hasn't been investigated - noted here rather than in
 `docs/format-spec.md` §10 since it's a runtime-correctness question, not
 a format one.
