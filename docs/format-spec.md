@@ -157,6 +157,10 @@ executables to check whether it matters in practice.
 
 ## 8. Runtime algorithm
 
+See [docs/memory-lifecycle.md](memory-lifecycle.md) for a phase-by-phase
+account of what's resident in memory and where, complementing the
+step-by-step algorithm below.
+
 The stub, on entry (position-independent, no relocation needed for
 itself):
 

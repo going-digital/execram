@@ -108,6 +108,7 @@ already-packed file one at a time - see
 
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) - architecture, milestones, and the reasoning behind each
 - [docs/format-spec.md](docs/format-spec.md) - the container format every backend's stub implements
+- [docs/memory-lifecycle.md](docs/memory-lifecycle.md) - what's resident in memory, where, and for how long, from `LoadSeg` to the payload's entry point
 - [docs/algorithm-notes/](docs/algorithm-notes/) - how each backend's compression format actually works
 - [docs/LICENSES.md](docs/LICENSES.md) - the full third-party license audit
 - [CONTRIBUTING.md](CONTRIBUTING.md) - building, testing, and adding a backend
