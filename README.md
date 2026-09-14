@@ -50,8 +50,9 @@ zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=
 M1-M6 done (store, inflate, zx0, and shrinkler backends all pack and
 boot real executables correctly, verified under FS-UAE) — see the
 milestones in [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). `execram
-pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto]
-[--mem=chip|fast] [-v] <in> <out>` works today (`auto`, the default,
+pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|most|auto]
+[--mem=chip|fast] [-v] <in> <out>` works today (`most`, the default,
+tries `zultra` and `salvador` and keeps the smaller result; `auto`
 tries every backend and keeps the smallest result). `shrinkler` -
 Shrinkler's own LZ + adaptive range coder, adapted rather than
 reimplemented (see [docs/LICENSES.md](docs/LICENSES.md)) - usually

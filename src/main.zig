@@ -44,6 +44,16 @@ const listing_shrinkler = @embedFile("stub_shrinkler_listing");
 
 const backend_names = [_][]const u8{ "store", "inflate", "zultra", "zx0", "salvador", "shrinkler" };
 
+/// `--backend=most`'s own backend set (and the default when `--backend`
+/// is omitted entirely) - zultra and salvador only, the two backends
+/// that in practice produce the smallest output for the bulk of their
+/// host-side compression cost (docs/format-spec.md); store/inflate
+/// rarely win and shrinkler/zx0 add much more wait than `most` users
+/// are willing to spend on every pack. `--backend=auto` remains
+/// available for trying every backend in `backend_names`, `most`'s
+/// slower, more thorough sibling.
+const most_backend_names = [_][]const u8{ "zultra", "salvador" };
+
 /// `execram bench`'s default backend set - `store` (no compression at
 /// all, rarely what anyone wants to compare against) and `zx0` (the
 /// same container/depacker as `salvador`, which produces the same
@@ -59,19 +69,24 @@ const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto]
+    \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|most|auto]
     \\               [--mem=chip|fast] [-v] [--flash] <in> <out>
     \\  execram info <packed-exe>
     \\  execram bench [--all] <in>
     \\  execram --version
     \\
-    \\--backend=auto (the default) tries every backend and keeps
-    \\whichever produces the smallest output. zultra and salvador are
-    \\alternative compressors for the same container/depacker "inflate"
-    \\and "zx0" use respectively - both aim for better ratios at the
-    \\cost of host-side compression time. shrinkler is a from-Shrinkler
-    \\LZ + adaptive range coder backend with its own container/depacker -
-    \\usually the smallest output of all, also the slowest to compress.
+    \\--backend=most (the default) tries zultra and salvador and keeps
+    \\whichever produces the smaller output - the two backends that
+    \\usually win outright, for a fraction of --backend=auto's total
+    \\compression time. --backend=auto tries every backend, most and
+    \\shrinkler and zx0 included, and keeps whichever produces the
+    \\smallest output overall - slower, but leaves nothing on the table.
+    \\zultra and salvador are alternative compressors for the same
+    \\container/depacker "inflate" and "zx0" use respectively - both aim
+    \\for better ratios at the cost of host-side compression time.
+    \\shrinkler is a from-Shrinkler LZ + adaptive range coder backend
+    \\with its own container/depacker - usually the smallest output of
+    \\all, also the slowest to compress.
     \\
     \\--mem overrides the Chip/Fast RAM choice that's otherwise
     \\auto-detected from the input's own hunk memory attributes (any
@@ -157,7 +172,7 @@ fn printVersion(io: Io) !void {
 }
 
 fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
-    var backend_name: []const u8 = "auto";
+    var backend_name: []const u8 = "most";
     var mem_override: ?bool = null; // true = force chip, false = force fast/any
     var verbose = false;
     var flash = false;
@@ -184,7 +199,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|most|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -214,7 +229,9 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     const exe_bytes, const used_backend = if (std.mem.eql(u8, backend_name, "auto"))
-        try packAuto(arena, image, verbose, flash)
+        try packBest(arena, image, &backend_names, verbose, flash)
+    else if (std.mem.eql(u8, backend_name, "most"))
+        try packBest(arena, image, &most_backend_names, verbose, flash)
     else
         .{ try packWithBackend(arena, image, backend_name, verbose, flash), backend_name };
 
@@ -225,13 +242,15 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     });
 }
 
-/// Tries every backend in `backend_names` and returns the smallest
-/// resulting output, along with which backend produced it - Shrinkler's
-/// own "just try it" approach to backend selection (PROJECT_PLAN.md M3).
-fn packAuto(arena: std.mem.Allocator, image: flatten.FlatImage, verbose: bool, flash: bool) !struct { []u8, []const u8 } {
+/// Tries every backend in `names` and returns the smallest resulting
+/// output, along with which backend produced it - Shrinkler's own "just
+/// try it" approach to backend selection (PROJECT_PLAN.md M3), backing
+/// both `--backend=most` (`most_backend_names`) and `--backend=auto`
+/// (`backend_names`).
+fn packBest(arena: std.mem.Allocator, image: flatten.FlatImage, names: []const []const u8, verbose: bool, flash: bool) !struct { []u8, []const u8 } {
     var best: ?[]u8 = null;
     var best_name: []const u8 = "";
-    for (backend_names) |name| {
+    for (names) |name| {
         const candidate = try packWithBackend(arena, image, name, verbose, flash);
         if (best == null or candidate.len < best.?.len) {
             best = candidate;
@@ -271,7 +290,7 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
     else if (std.mem.eql(u8, backend_name, "shrinkler"))
         .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, listing_shrinkler }
     else {
-        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'zx0'/'salvador'/'shrinkler'/'auto' exist so far", .{backend_name});
+        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'zx0'/'salvador'/'shrinkler'/'most'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
     };
 
