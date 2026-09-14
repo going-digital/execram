@@ -1,0 +1,16 @@
+# Manifest for tests/uae/run_real_exe_test.sh - see that script's own
+# header for the format. hexagon2.exe is a real Amiga program (not one
+# of gen_corpus.py's synthetic items) that already prints a fixed
+# string over the serial port on startup ("Hello debugger from
+# Amiga!") with no extra instrumentation needed - unlike hexagon.exe,
+# it doesn't loop printing a heartbeat afterward, so HEARTBEAT_CHECK
+# is left at its default (0): SENTINEL alone is the whole pass
+# condition.
+#
+# Added to the tracked real-exe suite after this exact file caught a
+# real bug: a 68000 Address Error in RelocFixup's reloc-stream escape
+# handling (see the commit that added this .meta), reproducible only
+# on a real (large, relocation-heavy) program - execram's synthetic
+# corpus never triggered it. Keeping this file exercised here going
+# forward is a regression guard against exactly that class of bug.
+SENTINEL="Hello debugger from Amiga!"

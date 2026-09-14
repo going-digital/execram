@@ -60,3 +60,15 @@ corpus's bare-metal boot block deliberately never needed).
   instead of chasing it further under the wrong boot mechanism. See
   that script's own header and the git log around when this file was
   added for the full trail if it matters to you.
+- `hexagon2.exe` - another real program, 220KB, that already prints a
+  fixed serial line ("Hello debugger from Amiga!") on its own with no
+  `exram_serial.h` instrumentation needed - just a `SENTINEL` in its
+  `.meta`, no `HEARTBEAT_CHECK` (it doesn't loop printing anything
+  afterward). This is the file that caught RelocFixup's real 68000
+  Address Error in the reloc-stream escape decode (see the commit that
+  added its `.meta`): a bug that only manifests when two relocation
+  sites happen to be spaced more than 506 bytes apart somewhere in the
+  file, landing an escape byte at an odd cumulative stream offset -
+  something no synthetic corpus item, and not even `hexagon.exe`,
+  happened to trigger. Kept here specifically as a regression guard
+  against that class of bug.
