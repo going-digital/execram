@@ -113,7 +113,24 @@ RelocFixup:
 	beq.s	.relocdone
 	cmp.b	#RELOC_STREAM_ESCAPE,d1
 	bne.s	.relochalf
-	move.l	(a5)+,d1
+	; docs/format-spec.md §7 does not align the escape's 4-byte
+	; big-endian payload to any boundary - it can legally start at an
+	; odd offset from the reloc-stream's own start, since every
+	; preceding record is a variable 1-or-5-byte run with no padding.
+	; A single `move.l (a5)+,d1` here is a real 68000 Address Error
+	; (vector 3) whenever that happens - confirmed by reproducing it
+	; under genuine FS-UAE A500 (68000) emulation, not just a real
+	; machine (this is very likely the actual cause of the real-
+	; hardware failure that motivated this fix). Read it byte-by-byte
+	; instead: legal at any address.
+	moveq	#0,d1
+	move.b	(a5)+,d1
+	lsl.l	#8,d1
+	move.b	(a5)+,d1
+	lsl.l	#8,d1
+	move.b	(a5)+,d1
+	lsl.l	#8,d1
+	move.b	(a5)+,d1
 .relochalf:
 	lsl.l	#1,d1			; delta = half_delta * 2
 	add.l	d1,d6
