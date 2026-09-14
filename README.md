@@ -1,25 +1,75 @@
 # execram
 
-An executable compressor for Amiga programs, in the spirit of
-[Shrinkler](https://github.com/askeksa/Shrinkler), with pluggable
-compression backends: DEFLATE ([inflate](docs/algorithm-notes/inflate.md)),
-[ZX0](docs/algorithm-notes/zx0.md), and
-[Shrinkler's own LZ77 + adaptive range coder](docs/algorithm-notes/shrinkler.md) -
-plus alternative, stronger host-side compressors (`zultra`, `salvador`)
-for the DEFLATE and ZX0 depackers respectively, sharing them without
-needing a new stub.
+execram is an executable compressor for Amiga programs, in the spirit
+of [Shrinkler](https://github.com/askeksa/Shrinkler): it takes an
+AmigaDOS load file and produces a smaller one that decompresses itself
+back to the original in memory when run, with no runtime dependency
+beyond AmigaDOS's own `LoadSeg`. Unlike Shrinkler, it supports several
+interchangeable compression backends rather than just one.
 
-v1.0: every backend packs and boots real Amiga executables correctly,
-verified against real emulated 68k hardware, not just host-side tests -
-see [Status](#status) below and [PROJECT_PLAN.md](PROJECT_PLAN.md) for
-the full milestone history.
+## How it works
+
+- **Flatten.** The input's hunks (code/data/BSS, relocations) are
+  flattened into a single image plus a relocation stream - the
+  compressor never has to understand hunks or relocations itself.
+- **Compress.** One of several pluggable backends compresses that
+  image: DEFLATE ([inflate](docs/algorithm-notes/inflate.md)),
+  [ZX0](docs/algorithm-notes/zx0.md), or [Shrinkler's own LZ77 +
+  adaptive range coder](docs/algorithm-notes/shrinkler.md) - plus
+  `zultra` and `salvador`, alternative, stronger host-side compressors
+  that reuse the inflate and ZX0 depackers respectively rather than
+  needing stubs of their own.
+- **Package.** The compressed payload is wrapped with a small 68k
+  depacker stub into a new two-hunk AmigaDOS executable: a tiny
+  resident hunk sized for the decompressed program, and a scratch hunk
+  (stub + payload) that decompresses in place and is freed before the
+  program itself runs - see
+  [docs/memory-lifecycle.md](docs/memory-lifecycle.md).
+- **Verify.** Before anything is written to disk, execram decompresses
+  its own output host-side and checks it byte-for-byte against the
+  original - it refuses to save a broken executable rather than ship
+  one and find out on real hardware.
+
+See [docs/format-spec.md](docs/format-spec.md) for the exact container
+format every backend's stub implements.
+
+## Usage
 
 Prebuilt binaries for Linux (x86_64/aarch64/arm), macOS
 (x86_64/aarch64), and Windows (x86_64/aarch64) are published on the
-[Releases page](../../releases) for every tagged version - see
-[CONTRIBUTING.md](CONTRIBUTING.md#releasing) for how those are built.
-Building from source (below) is the only option for anything not
-tagged yet.
+[Releases page](../../releases) for every tagged version; see
+[Building](#building) below to build from source instead.
+
+```sh
+execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|most|auto]
+             [--mem=chip|fast] [-v] [--flash] <in> <out>
+```
+
+Packs `<in>` into `<out>`. `--backend=most`, the default, tries
+`zultra` and `salvador` and keeps whichever is smaller - the two
+backends that usually win, without paying for an exhaustive search;
+`--backend=auto` tries all six and keeps the smallest overall.
+`shrinkler` - Shrinkler's own LZ + adaptive range coder, adapted rather
+than reimplemented - usually produces the smallest output of all, at
+the cost of the slowest host-side compression. Chip vs. Fast RAM is
+normally auto-detected from the input; `--mem` overrides it.
+
+```sh
+execram info <packed-exe>
+```
+
+Reports a packed executable's container header (backend, memory type,
+relocations, sizes, ratio) without decompressing anything.
+
+```sh
+execram bench [--all] <in>
+```
+
+Packs `<in>` with several backends and prints a comparison table:
+output size, compression ratio, and 68000 decompression cost in exact
+CPU cycles, measured by running each depacker stub through
+[Musashi](https://github.com/kstenerud/Musashi) (a 68000 CPU-core
+emulator) rather than a real-time-paced emulator boot.
 
 ## Building
 
@@ -47,63 +97,12 @@ zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=
 
 ## Status
 
-M1-M6 done (store, inflate, zx0, and shrinkler backends all pack and
-boot real executables correctly, verified under FS-UAE) — see the
-milestones in [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones). `execram
-pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|most|auto]
-[--mem=chip|fast] [-v] <in> <out>` works today (`most`, the default,
-tries `zultra` and `salvador` and keeps the smaller result; `auto`
-tries every backend and keeps the smallest result). `shrinkler` -
-Shrinkler's own LZ + adaptive range coder, adapted rather than
-reimplemented (see [docs/LICENSES.md](docs/LICENSES.md)) - usually
-produces the smallest output of all, at the cost of the slowest
-host-side compression.
-
-`execram info <packed-exe>` reports a packed executable's container
-header fields (backend, memory type, relocations, sizes, ratio)
-without decompressing anything. Every `pack` also self-checks before
-writing anything: it decompresses what it just produced, host-side,
-and compares it byte-for-byte against the original - refusing to save
-a broken executable rather than shipping one and finding out on real
-hardware.
-
-A synthetic test corpus (`tests/corpus/`) and matrix runner
-(`tests/uae/run_corpus_test.sh`) boot every backend against several
-purpose-built programs - no relocations at all, a Chip-RAM-resident
-hunk, a large BSS actually verified zeroed at runtime, a
-non-compressible payload - catching things the two original e2e
-programs didn't reach; `tests/ratio/track_ratios.py` tracks every
-backend's output size against a committed baseline and runs in CI
-(`.github/workflows/ci.yml`), no Kickstart ROM required.
-
-`tests/uae/run_real_exe_test.sh` boots real, third-party executables
-(not written for this test suite) the same way AmigaDOS actually
-would - a genuine launch via FS-UAE's own auto-boot of a single
-executable file, not the bare-metal boot block every other script here
-uses, since a real program's own `OpenLibrary` calls need a real
-environment to succeed in.
-
-`zultra` is an alternative, stronger host-side compressor for the same
-container/depacker `inflate` uses (both produce standard raw DEFLATE) —
-see [src/backends/zultra_vendor/README.md](src/backends/zultra_vendor/README.md).
-Likewise, `salvador` is an alternative host-side compressor for the same
-container/depacker `zx0` uses (both produce the same ZX0 v2 format) —
-see [src/backends/salvador_vendor/README.md](src/backends/salvador_vendor/README.md).
-
-`execram bench [--all] <in>` packs an executable with every backend
-(all six with `--all`; otherwise inflate/zultra/salvador/shrinkler -
-store adds no compression to compare, and zx0 shares salvador's exact
-decompression cost for a much slower host-side compress) and prints a
-table: output size, compression ratio, and 68000 depack cost in exact
-CPU cycles - measured by actually running each depacker stub through
-[Musashi](https://github.com/kstenerud/Musashi), a 68000 CPU-core
-emulator, instead of FS-UAE's real-time-paced boot process. Useful for
-comparing backends' decompression speed without host-load noise, though
-it's a best-case lower bound (no chip RAM bus-contention modeling)
-rather than a wall-clock prediction. `tools/bench/` is a separate,
-dev-only tool built on the same Musashi core for timing an
-already-packed file one at a time - see
-[tools/bench/README.md](tools/bench/README.md).
+v1.0: all six backends pack and boot real Amiga executables correctly,
+verified against real emulated 68k hardware, not just host-side tests -
+see [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones) for the full
+milestone history and [CONTRIBUTING.md](CONTRIBUTING.md) for how the
+test suite (a synthetic corpus, a Musashi-based cycle-exact matrix, and
+real third-party executables booted under FS-UAE) is organized.
 
 ## Documentation
 
