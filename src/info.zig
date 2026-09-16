@@ -182,6 +182,7 @@ fn backendIdName(id: u8) []const u8 {
         4 => "lz4 (smallest depacker, 72 bytes)",
         5 => "lz4 (normal depacker, 180 bytes)",
         6 => "lz4 (fastest depacker, 3722 bytes)",
+        7 => "zx0-compatible, fast depacker (zx0fast or salvadorfast)",
         else => "unknown",
     };
 }

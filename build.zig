@@ -64,6 +64,12 @@ const stubs = [_]Stub{
         .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000.s" },
     },
     .{
+        .name = "stub_zx0fast",
+        .source = "stubs/zx0/stub_fast.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000_fast.s" },
+    },
+    .{
         .name = "stub_shrinkler",
         .source = "stubs/shrinkler/stub.s",
         .include_dir = "stubs/common",

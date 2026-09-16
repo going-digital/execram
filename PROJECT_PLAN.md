@@ -513,7 +513,57 @@ environment: prefer the native FS-UAE.app over the debugger-extension's
 bundled copy for these tests. See `stubs/lz4/README.md`, `src/backends/lz4_vendor/README.md`,
 and `docs/LICENSES.md` §15/§16.
 
-**M4 — Shrinkler-class backend** ✅ done
+**zx0fast / salvadorfast — a faster ZX0 depacker** ✅ done (unplanned
+addition, in response to a user-supplied lead: Chris Hodges/Platon42's
+fork of `unzx0_68000`). Same shape as the LZ4 trio: `zx0`'s and
+`salvador`'s exact host encoders (byte-identical payload either way),
+paired with a different depacker stub - own `backend_id` (7), not a
+shared one, matching the rule LZ4 established. The fork restructures
+`unzx0_68000.s` to inline `get_elias` at each of its four call sites
+instead of sharing one `bsr`/`rts` subroutine.
+
+Evaluated before integrating (per the same "measure, don't assume" bar
+as libdeflate/Zopfli/LZ4): built as a temporary, uncommitted stub,
+verified correct via host-side self-check and the full real-hardware
+suite, measured against the current stub via `execram bench`, then
+integrated only once the numbers held up. Real numbers,
+`tests/corpus/hexagon.exe`:
+
+| | depacker size | full stub | packed size | decompress cycles |
+|---|---:|---:|---:|---:|
+| `unzx0_68000.s` (zx0/salvador) | 88 B | 288 B | 156532 B | 18,594,000 |
+| `unzx0_68000_fast.s` (zx0fast/salvadorfast) | 138 B | 352 B | 156596 B | 14,424,900 |
+
+~29% fewer decompression cycles for 64 more bytes in the packed
+output - not smaller (the fork's own README claims ~50% on different
+test data; this project's own measurement is the number to trust for
+this corpus), a genuine speed-vs-size trade like the LZ4 trio, not a
+strict win. One real constraint worth flagging: the fork's own header
+documents narrowing several internal 32-bit accumulators to 16-bit as
+part of the same optimization, capping any single literal-run or match
+length at 65535 - not a concern for any program tried so far, but a
+genuine limit `unzx0_68000.s` doesn't have. Not added to
+`--backend=most` (same reasoning as the LZ4 trio: this is a
+speed decision for the packed program's own author, not something
+`most` should decide); `salvadorfast` added to `execram bench`'s
+default set (fast to compress, gives the real comparison against
+`salvador`), `zx0fast` excluded from it for the same reason plain `zx0`
+already is (redundant decompression-cost info at a vastly slower
+compress time - it now shares `salvadorfast`'s exact decompression
+cost, not `salvador`'s).
+
+Verified on real hardware, not just host-side: byte-exact
+`run_large_e2e_test.sh` for both `zx0fast` and `salvadorfast`, the full
+`run_corpus_test.sh` matrix (8/8), and `run_real_exe_test.sh` against
+both real corpus programs via genuine AmigaDOS launches. One
+provenance wrinkle: the upstream repo lives on Chris Hodges' own Gitea
+instance (`git.platon42.de`), which rejected an anonymous `git clone`;
+the vendored copy was sourced from a Wayback Machine snapshot of the
+same file instead (extracted from the rendered source-view HTML, not a
+raw diff) and independently verified by reassembling it to the exact
+byte size the fork's own README claims (138 bytes) before trusting it
+further - see `docs/LICENSES.md` §17 for why no commit hash is pinned
+the way every other entry there is.
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
   is public-domain-equivalent and the rest of its codebase is permissive
   attribution-only — so this backend directly adapts/ports Shrinkler's

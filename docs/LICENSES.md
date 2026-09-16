@@ -310,6 +310,7 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | Zopfli | Apache 2.0 | Yes | Retain notice; mark changed files |
 | LZ4/LZ4HC | BSD 2-Clause | Yes | Retain notice |
 | lz4-68k | MIT | Yes | Retain notice |
+| unzx0_68000 (fast fork, Platon42) | zlib | Yes | Retain notice |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | Musashi | MIT | Yes (see §11) | Retain notice |
@@ -505,3 +506,41 @@ genuinely different depackers, so each gets its own `backend_id`
 
 Permissive, no copyleft; fine to vendor/adapt directly, honoring the
 notice.
+
+## 17. unzx0_68000 (fast fork) — `chrisly42/unzx0_68000`
+
+Commit audited: main branch as of 2026-09-16, via the Wayback Machine's
+2026-05-11 snapshot of `git.platon42.de/chrisly42/unzx0_68000` (the
+live server rejected an anonymous `git clone`, so no commit hash is
+pinned the way every other entry here is - re-verify against the live
+repo before any further changes, per this doc's own top-of-file
+policy).
+
+Chris Hodges (Platon42)'s fork of `unzx0_68000` (§3) - same depacker
+algorithm, restructured to inline `get_elias` at all four of its call
+sites instead of sharing one `bsr`/`rts` subroutine, trading code size
+for fewer branches. Backs the new `zx0fast`/`salvadorfast` CLI
+backends: same host-side encoders and payload format as `zx0`/
+`salvador` (§2, §7), a different depacker stub, hence its own
+`backend_id` (`src/container.zig`).
+
+- **`unzx0_68000_fast.s`:** zlib license (`Copyright (C) 2021 Emmanuel
+  Marty, Copyright (C) 2023 Emmanuel Marty, Chris Hodges`) - identical
+  terms to `unzx0_68000.s` (§3), just an added 2023 copyright line for
+  the fork's own contribution.
+- **Modification:** wrapped in a `movem.l d2/a2,-(sp)` /
+  `bsr.w zx0_decompress` / `movem.l (sp)+,d2/a2` pair
+  (`stubs/zx0/stub_fast.s`) - this fork's own header says it "trashes:
+  d0-d2/a2," so (unlike `unzx0_68000.s`, which preserves D2/A2 itself)
+  it needs the same category of wrapper the lz4 stubs do (§16).
+
+Permissive, no copyleft; fine to vendor/adapt directly, honoring the
+notice. One real trade-off worth flagging, not a license concern:
+this fork's own header also documents narrowing several internal
+32-bit (`addx.l`) accumulators to 16-bit (`addx.w`) as part of the
+same speed optimization, capping any single literal-run or match
+length this decoder can correctly represent at 65535 - unlikely for
+real programs, but a genuine, documented constraint the original
+`unzx0_68000.s` doesn't have. See `PROJECT_PLAN.md`'s zx0fast entry
+for the measured size/speed numbers and this constraint's practical
+risk.

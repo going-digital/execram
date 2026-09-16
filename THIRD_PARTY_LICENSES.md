@@ -63,9 +63,11 @@ or suitability.
 
 ## zlib License
 
-Applies to: `stubs/zx0/unzx0_68000.s` (Emmanuel Marty), most of
-`src/backends/zultra_vendor/` (Emmanuel Marty), most of
-`src/backends/salvador_vendor/` (Emmanuel Marty).
+Applies to: `stubs/zx0/unzx0_68000.s` (Emmanuel Marty),
+`stubs/zx0/unzx0_68000_fast.s` (Emmanuel Marty, Chris Hodges - see
+`docs/LICENSES.md` §17), most of `src/backends/zultra_vendor/`
+(Emmanuel Marty), most of `src/backends/salvador_vendor/` (Emmanuel
+Marty).
 
 ```
 This software is provided 'as-is', without any express or implied

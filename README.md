@@ -43,14 +43,14 @@ Prebuilt binaries for Linux (x86_64/aarch64/arm), macOS
 [Building](#building) below to build from source instead.
 
 ```sh
-execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|most|auto]
+execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|zx0fast|salvadorfast|most|auto]
              [--mem=chip|fast] [-v] [--flash] <in> <out>
 ```
 
 Packs `<in>` into `<out>`. `--backend=most`, the default, tries
 `zultra` and `salvador` and keeps whichever is smaller - the two
 backends that usually win, without paying for an exhaustive search;
-`--backend=auto` tries all eleven and keeps the smallest overall.
+`--backend=auto` tries all thirteen and keeps the smallest overall.
 `shrinkler` - Shrinkler's own LZ + adaptive range coder, adapted rather
 than reimplemented - usually produces the smallest output of all, at
 the cost of the slowest host-side compression. `lz4small`/`lz4normal`/
@@ -59,8 +59,11 @@ depacker stubs (72/180/3722 bytes) that trade stub size for
 decompression speed - all three produce identical payload bytes, so
 picking between them is a real speed-vs-size call for your own
 program, not something execram decides for you (see `execram bench`).
-Chip vs. Fast RAM is normally auto-detected from the input; `--mem`
-overrides it.
+`zx0fast`/`salvadorfast` make the same trade for the ZX0 format:
+`zx0`'s/`salvador`'s exact host encoders paired with a faster depacker
+(Chris Hodges/Platon42's fork), ~29% fewer decompression cycles for a
+64-byte larger stub. Chip vs. Fast RAM is normally auto-detected from
+the input; `--mem` overrides it.
 
 ```sh
 execram info <packed-exe>

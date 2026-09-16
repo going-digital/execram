@@ -28,6 +28,11 @@ depacker stubs sharing one host-side LZ4HC encoder, added as
 all in `src/container.zig`'s `BackendId`), so still no `version_major`
 bump. See `PROJECT_PLAN.md`'s LZ4 entry.
 
+Also post-v1.0: `zx0fast`/`salvadorfast`, a new depacker stub
+(`backend_id` 7, §4) reusing `zx0`/`salvador`'s exact host encoders -
+same additive shape as above, no `version_major` bump. See
+`PROJECT_PLAN.md`'s zx0fast entry.
+
 ## 1. Two-layer model
 
 execram deliberately separates two concerns that Shrinkler couples
@@ -150,7 +155,8 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 | 4     | lz4 (smallest depacker) | post-v1.1.0 (`lz4small` CLI backend) |
 | 5     | lz4 (normal depacker) | post-v1.1.0 (`lz4normal` CLI backend) |
 | 6     | lz4 (fastest depacker) | post-v1.1.0 (`lz4fast` CLI backend) - all three share one host-side LZ4HC encoder (identical payload bytes) but each embeds a genuinely different depacker stub, unlike every entry above, hence one ID per stub rather than one shared ID |
-| 7-254 | reserved for future backends | |
+| 7     | zx0-compatible, fast depacker | post-v1.1.0 (`zx0fast`/`salvadorfast` CLI backends) - same two host encoders as `zx0`/`salvador` (2), a different (Chris Hodges/Platon42's) depacker stub, same reasoning as 4-6 above |
+| 8-254 | reserved for future backends | |
 | 255   | invalid / never emitted | tooling sentinel |
 
 ## 5. `flags` bitfield

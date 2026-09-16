@@ -19,6 +19,11 @@ pub const BackendId = enum(u8) {
     lz4_small = 4,
     lz4_normal = 5,
     lz4_fast = 6,
+    /// Same ZX0-format payload as `zx0` (2), same rule as lz4 above:
+    /// "zx0fast"/"salvadorfast" share the exact same two host encoders
+    /// as "zx0"/"salvador" but embed a genuinely different (Platon42's)
+    /// depacker stub - own ID, not a shared one.
+    zx0_fast = 7,
     _,
 };
 
