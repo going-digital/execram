@@ -118,6 +118,36 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## BSD 2-Clause License
+
+Applies to: `src/backends/lz4_vendor/` (Copyright (c) Yann Collet -
+see `docs/LICENSES.md` §15 and `src/backends/lz4_vendor/README.md`).
+
+```
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ## MIT License
 
 Applies to: `src/backends/zultra_vendor/libdivsufsort/` and
@@ -127,9 +157,11 @@ the same upstream project, both by Yuta Mori - see
 `src/musashi_vendor/` (Karl Stenerud - see `docs/LICENSES.md` §11 and
 `src/musashi_vendor/README.md`; compiled directly into this binary via
 the `bench` command, not just a build/test-time tool the way vasm and
-vlink are), and `src/backends/libdeflate_vendor/` (Eric Biggers and
+vlink are), `src/backends/libdeflate_vendor/` (Eric Biggers and
 Google LLC - see `docs/LICENSES.md` §12 and
-`src/backends/libdeflate_vendor/README.md`).
+`src/backends/libdeflate_vendor/README.md`), and `stubs/lz4/`'s three
+`.asm` depackers (Arnaud Carré - see `docs/LICENSES.md` §16 and
+`stubs/lz4/README.md`).
 
 ```
 Permission is hereby granted, free of charge, to any person obtaining a
