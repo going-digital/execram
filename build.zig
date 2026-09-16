@@ -14,24 +14,17 @@ const Stub = struct {
     /// listed explicitly so it can be registered as a cache input below -
     /// see `addIncludedFileInputs`'s doc comment for why this exists.
     extra_includes: []const []const u8 = &.{},
-    /// vasm's syntax module is chosen per invocation and can't be mixed
-    /// within one assembly. Everything is Motorola/Devpac syntax
-    /// (vasmm68k_mot) except the inflate stub, which needs vasm's
-    /// GNU-as-style module to assemble the vendored inflate.S it
-    /// includes - see stubs/inflate/README.md.
-    syntax: enum { mot, std } = .mot,
 };
 
 /// Registers `path` as a cache input on `run` via `addFileInput` (tracked
 /// for invalidation, but not added to argv - these files reach vasm
 /// through `-I`/relative `include`, not as direct arguments). Without
 /// this, Zig's build cache only hashes the top-level `.source` file
-/// passed via `addFileArg`; an edit to a shared file an `include`/
-/// `.include` directive pulls in (stubs/common/runtime.i, stubs/inflate/
-/// runtime_std.i, etc.) is invisible to the cache key, so `zig build`
-/// silently keeps serving a stale assembled stub. Confirmed directly:
-/// editing runtime_std.i alone did not change stub_inflate's cached
-/// output until this was added.
+/// passed via `addFileArg`; an edit to a shared file an `include`
+/// directive pulls in (stubs/common/runtime.i, etc.) is invisible to
+/// the cache key, so `zig build` silently keeps serving a stale
+/// assembled stub. Confirmed directly: editing runtime.i alone did not
+/// change stub_inflate's cached output until this was added.
 fn addIncludedFileInputs(b: *std.Build, run: *std.Build.Step.Run, paths: []const []const u8) void {
     for (paths) |path| run.addFileInput(b.path(path));
 }
@@ -53,9 +46,8 @@ const stubs = [_]Stub{
     .{
         .name = "stub_inflate",
         .source = "stubs/inflate/stub.s",
-        .include_dir = "stubs/inflate",
-        .extra_includes = &.{ "stubs/inflate/runtime_std.i", "stubs/inflate/header_std.i", "stubs/inflate/inflate_core.s" },
-        .syntax = .std,
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/inflate/inflate_core.s" },
     },
     .{
         .name = "stub_zx0",
@@ -118,11 +110,6 @@ pub fn build(b: *std.Build) void {
         "vasm",
         "Path to the vasmm68k_mot binary used to assemble 68k stubs",
     ) orelse "vasmm68k_mot";
-    const vasm_std = b.option(
-        []const u8,
-        "vasm-std",
-        "Path to the vasmm68k_std binary, needed only for the inflate stub (see stubs/inflate/README.md)",
-    ) orelse "vasmm68k_std";
     const vlink = b.option(
         []const u8,
         "vlink",
@@ -483,10 +470,7 @@ pub fn build(b: *std.Build) void {
 
     for (stubs) |stub| {
         const assemble = b.addSystemCommand(&.{
-            switch (stub.syntax) {
-                .mot => vasm,
-                .std => vasm_std,
-            },
+            vasm,
             "-Fbin", // raw binary output, no hunk/object wrapper
             "-no-opt", // no branch/addressing-mode relaxation: keep stub timing predictable
             "-quiet",
@@ -517,10 +501,7 @@ pub fn build(b: *std.Build) void {
         // correct than teaching the real build to parse some other
         // output format for offsets.
         const assemble_listing = b.addSystemCommand(&.{
-            switch (stub.syntax) {
-                .mot => vasm,
-                .std => vasm_std,
-            },
+            vasm,
             "-Fbin",
             "-no-opt",
             "-quiet",

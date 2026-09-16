@@ -60,7 +60,6 @@ BOOT_TIMEOUT_CHECKS=180 # 180 * 0.5s = 90s to see the sentinel - shrinkler's
 # size specifically.
 HEARTBEAT_WAIT_SECONDS=10 # extra time to confirm continued output afterward
 VASM="${EXECRAM_VASM:-vasmm68k_mot}"
-VASM_STD="${EXECRAM_VASM_STD:-vasmm68k_std}"
 
 BACKENDS=(store inflate zultra zx0 salvador shrinkler)
 
@@ -98,7 +97,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== building execram =="
-(cd "$REPO_ROOT" && zig build -Dvasm="$VASM" -Dvasm-std="$VASM_STD") || exit 1
+(cd "$REPO_ROOT" && zig build -Dvasm="$VASM") || exit 1
 EXECRAM="$REPO_ROOT/zig-out/bin/execram"
 
 declare -A RESULTS

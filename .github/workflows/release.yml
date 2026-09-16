@@ -35,12 +35,11 @@ jobs:
       # Same as .github/workflows/ci.yml - see that file's own comment
       # on why these are built from source every run rather than
       # vendored.
-      - name: Build vasm (m68k/mot and m68k/std)
+      - name: Build vasm (m68k/mot)
         run: |
           curl -sL -o /tmp/vasm.tar.gz http://sun.hasenbraten.de/vasm/release/vasm.tar.gz
           tar xzf /tmp/vasm.tar.gz -C /tmp
           make -C /tmp/vasm CPU=m68k SYNTAX=mot
-          make -C /tmp/vasm CPU=m68k SYNTAX=std
           echo "/tmp/vasm" >> "$GITHUB_PATH"
 
       - name: Build vlink
@@ -120,12 +119,11 @@ jobs:
       # Only vasm is needed here, not vlink: `zig build` (unlike
       # `zig build test`) never touches the vlink-linked test fixtures
       # - see build.zig's own comment on why those are test_module-only.
-      - name: Build vasm (m68k/mot and m68k/std)
+      - name: Build vasm (m68k/mot)
         run: |
           curl -sL -o /tmp/vasm.tar.gz http://sun.hasenbraten.de/vasm/release/vasm.tar.gz
           tar xzf /tmp/vasm.tar.gz -C /tmp
           make -C /tmp/vasm CPU=m68k SYNTAX=mot
-          make -C /tmp/vasm CPU=m68k SYNTAX=std
           echo "/tmp/vasm" >> "$GITHUB_PATH"
 
       - name: Build execram for ${{ matrix.target }}

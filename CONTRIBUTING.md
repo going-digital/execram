@@ -3,7 +3,7 @@
 ## Building and testing
 
 See [README.md](README.md#building) for the toolchain requirements
-(Zig 0.16, two vasm builds, vlink) and basic commands. More test suites
+(Zig 0.16, vasm, vlink) and basic commands. More test suites
 exist beyond `zig build test`, all local/dev-machine-only because they
 need a Kickstart ROM (copyrighted - see `docs/LICENSES.md` §9, never
 commit or fetch one in CI):

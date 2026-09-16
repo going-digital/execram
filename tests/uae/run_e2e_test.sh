@@ -18,9 +18,7 @@
 # script builds execram itself, so Zig and vasm/vlink are all it needs.
 #
 # EXECRAM_TEST_BACKEND selects which backend to pack with (default
-# store); the inflate backend also needs EXECRAM_VASM_STD (a
-# vasmm68k_std build - see stubs/inflate/README.md) if it isn't on PATH
-# under that name already.
+# store).
 
 set -euo pipefail
 
@@ -30,7 +28,6 @@ FSUAE_BIN="${EXECRAM_FSUAE:-/Applications/FS-UAE.app/Contents/MacOS/fs-uae}"
 SENTINEL="EXECRAM-PACKED-OK"
 BOOT_TIMEOUT_CHECKS=24 # 24 * 0.5s = 12s
 VASM="${EXECRAM_VASM:-vasmm68k_mot}"
-VASM_STD="${EXECRAM_VASM_STD:-vasmm68k_std}"
 VLINK="${EXECRAM_VLINK:-vlink}"
 BACKEND="${EXECRAM_TEST_BACKEND:-store}"
 
@@ -60,7 +57,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== building execram =="
-(cd "$REPO_ROOT" && zig build -Dvasm="$VASM" -Dvasm-std="$VASM_STD")
+(cd "$REPO_ROOT" && zig build -Dvasm="$VASM")
 EXECRAM="$REPO_ROOT/zig-out/bin/execram"
 
 echo "== assembling and linking the test program =="

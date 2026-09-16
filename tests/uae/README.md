@@ -60,17 +60,7 @@ EXECRAM_KICKSTART=~/amiga/"Kickstart v1.3 ...rom" \
   tests/uae/run_e2e_test.sh   # or store/zultra/zx0/salvador/shrinkler (script default: store)
 ```
 
-The inflate and zultra backends also need `EXECRAM_VASM_STD` (a
-`vasmm68k_std` build - see `stubs/inflate/README.md`) if it isn't on
-`PATH` under that name already, and `EXECRAM_VLINK` if `vlink` isn't on
-`PATH`. (`zultra` uses `inflate`'s exact same stub - see
-`src/backends/zultra_vendor/README.md` - so it needs `vasmm68k_std` for
-the same reason `inflate` does, not a reason of its own. Likewise
-`salvador` uses `zx0`'s stub, and `shrinkler` has its own dedicated
-stub (`stubs/shrinkler/`) - neither needs `vasmm68k_std` for their own
-sake; `EXECRAM_VASM_STD` is needed regardless of which backend is under
-test, since `zig build` always assembles every stub, `stub_inflate`
-included.)
+Also needs `EXECRAM_VLINK` if `vlink` isn't on `PATH`.
 
 It builds `execram`, links `e2e/program.s` (a small program with both a
 cross-hunk and a self-hunk relocation) into a real executable, packs it

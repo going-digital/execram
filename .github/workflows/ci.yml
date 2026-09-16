@@ -21,16 +21,12 @@ jobs:
       # vasm and vlink have no official package on either runner image, and
       # per their license (docs/LICENSES.md) we don't vendor them in this
       # repo - so build both fresh from upstream source every run. A few
-      # seconds each. Both vasm syntax modules are needed: mot for every
-      # stub except inflate's, std for that one (see
-      # stubs/inflate/README.md) - and since stub_inflate is embedded in
-      # the shipped binary, not just tests, plain `zig build` needs both.
-      - name: Build vasm (m68k/mot and m68k/std)
+      # seconds each.
+      - name: Build vasm (m68k/mot)
         run: |
           curl -sL -o /tmp/vasm.tar.gz http://sun.hasenbraten.de/vasm/release/vasm.tar.gz
           tar xzf /tmp/vasm.tar.gz -C /tmp
           make -C /tmp/vasm CPU=m68k SYNTAX=mot
-          make -C /tmp/vasm CPU=m68k SYNTAX=std
           echo "/tmp/vasm" >> "$GITHUB_PATH"
 
       - name: Build vlink

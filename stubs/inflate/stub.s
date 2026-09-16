@@ -1,21 +1,21 @@
 ; "inflate" backend depacker stub: real DEFLATE decompression via a
 ; vendored/adapted Keir Fraser inflate.S (see inflate_core.s and
-; README.md for why this whole stub is std-syntax, unlike every other
-; stub in this project).
+; README.md for its conversion history - now ordinary Motorola/Devpac
+; syntax, like every other stub in this project).
 
-	.include	"runtime_std.i"
-	.include	"inflate_core.s"
+	include	"../common/runtime.i"
+	include	"inflate_core.s"
 
 ; inflate.S's OPT_STORAGE_OFFSTACK convention: A6 must point at the
 ; *end* of this many bytes of scratch memory. 2928 is upstream's own
 ; documented figure for OPT_TABLE_LOOKUP=1 (kept at its default, on).
-.equ INFLATE_STORAGE_SIZE,2928
+INFLATE_STORAGE_SIZE	=	2928
 
 ; In:  A0 = compressed (DEFLATE) input, A1 = output.
 ;      D0 = compressed_size - unused: DEFLATE streams are
 ;      self-terminating, inflate.S decodes until the final block's
 ;      end-of-block marker regardless.
-; Preserves D2-D7/A2-A6 per runtime_std.i's contract by saving them
+; Preserves D2-D7/A2-A6 per runtime.i's contract by saving them
 ; up front and restoring before returning - freely reused as scratch
 ; (including for ExecBase and inflate.S's own A4/A5/A6 arguments) in
 ; between. Must be D2-D7, not just A2-A6: inflate's own top-level entry
@@ -57,5 +57,5 @@ Depack:
 	movem.l	(sp)+,d2-d7/a2-a6
 	rts
 
-	.even
+	even
 StubEnd:

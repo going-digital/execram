@@ -84,15 +84,11 @@ emulator) rather than a real-time-paced emulator boot.
 
 ## Building
 
-Requires [Zig 0.16](https://ziglang.org/) and two builds of
-[vasm](http://sun.hasenbraten.de/vasm/) on `PATH`: `vasmm68k_mot` (used
-by every stub except inflate's) and `vasmm68k_std` (needed only by the
-inflate stub, which includes a vendored upstream file written for a
-GNU-as-style dialect — see
-[stubs/inflate/README.md](stubs/inflate/README.md)). `zig build test`
-additionally needs [vlink](http://sun.hasenbraten.de/vlink/) on `PATH`
-to link the real test-fixture executables `src/hunk.zig`'s tests run
-against.
+Requires [Zig 0.16](https://ziglang.org/) and
+[vasm](http://sun.hasenbraten.de/vasm/)'s Motorola/Devpac build
+(`vasmm68k_mot`) on `PATH`. `zig build test` additionally needs
+[vlink](http://sun.hasenbraten.de/vlink/) on `PATH` to link the real
+test-fixture executables `src/hunk.zig`'s tests run against.
 
 ```sh
 zig build              # build ./zig-out/bin/execram
@@ -103,7 +99,7 @@ zig build run -- pack  # build and run
 If any of these aren't on `PATH`, point at them explicitly:
 
 ```sh
-zig build -Dvasm=/path/to/vasmm68k_mot -Dvasm-std=/path/to/vasmm68k_std -Dvlink=/path/to/vlink
+zig build -Dvasm=/path/to/vasmm68k_mot -Dvlink=/path/to/vlink
 ```
 
 ## Status

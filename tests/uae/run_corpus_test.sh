@@ -17,7 +17,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FSUAE_BIN="${EXECRAM_FSUAE:-/Applications/FS-UAE.app/Contents/MacOS/fs-uae}"
 BOOT_TIMEOUT_CHECKS=60 # 60 * 0.5s = 30s - every corpus item's transcript is short
 VASM="${EXECRAM_VASM:-vasmm68k_mot}"
-VASM_STD="${EXECRAM_VASM_STD:-vasmm68k_std}"
 VLINK="${EXECRAM_VLINK:-vlink}"
 
 BACKENDS=(store inflate zultra zx0 salvador shrinkler)
@@ -49,7 +48,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== building execram =="
-(cd "$REPO_ROOT" && zig build -Dvasm="$VASM" -Dvasm-std="$VASM_STD") || exit 1
+(cd "$REPO_ROOT" && zig build -Dvasm="$VASM") || exit 1
 EXECRAM="$REPO_ROOT/zig-out/bin/execram"
 
 echo "== generating the corpus =="
