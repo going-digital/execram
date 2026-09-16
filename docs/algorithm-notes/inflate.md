@@ -1,8 +1,8 @@
-# inflate (and zultra)
+# inflate (and zultra, libdeflate, zopfli)
 
 Standard raw DEFLATE (RFC 1951) - no zlib or gzip wrapper, since the
 depacker doesn't check a header or trailing checksum and every wrapper
-byte would be pure overhead on a platform this size-conscious. Two
+byte would be pure overhead on a platform this size-conscious. Four
 host-side compressors target this exact same format and share
 everything else:
 
@@ -13,10 +13,22 @@ everything else:
   optimal-parse DEFLATE encoder (emmanuel-marty/zultra), usually a
   little smaller at the cost of more host-side compute. See
   `src/backends/zultra_vendor/README.md`.
+- **`libdeflate`** (`src/backends/libdeflate.zig`): a vendored,
+  near-optimal-parse DEFLATE encoder (ebiggers/libdeflate) at its own
+  maximum compression level - measured close behind `zultra` on the
+  project's own corpus (within ~0.5%), ahead of plain `inflate`. See
+  `src/backends/libdeflate_vendor/README.md`.
+- **`zopfli`** (`src/backends/zopfli.zig`): a vendored, iterative
+  cost-based "squeeze" LZ77 parser (google/zopfli) - the original
+  reference algorithm `zultra` and `libdeflate`'s own near-optimal
+  parsers are inspired by/compared against. Measured a statistical tie
+  with `zultra` on the project's own corpus (each wins on one of two
+  test files, by tens of bytes), both ahead of `libdeflate`. See
+  `src/backends/zopfli_vendor/README.md`.
 
-Both produce bit-compatible output for the one depacker
+All four produce bit-compatible output for the one depacker
 (`stubs/inflate/`, adapted from Keir Fraser's public-domain
-`inflate.S`) to decode - `backend_id` 1 covers both; the container
+`inflate.S`) to decode - `backend_id` 1 covers all four; the container
 format has no way to tell which one produced a given file, nor any
 need to.
 
@@ -37,13 +49,13 @@ techniques:
   overhead per block but better-fitted codes).
 
 `inflate`'s only real choice is compression level (search effort,
-`.level_9` = maximum); `zultra` does the same job with a more
-exhaustive optimal-parse search for LZ77 matches specifically, at
-higher host-side compute cost, but is still bounded by DEFLATE's own
-format ceiling (backref distances up to 32KB, lengths up to 258 bytes)
-regardless of parse quality - see the ratio numbers in
-`PROJECT_PLAN.md`'s M2/M3-adjacent sections for how that ceiling
-compares against zx0/shrinkler on the same test data.
+`.level_9` = maximum); `zultra`, `libdeflate`, and `zopfli` do the same
+job with a more exhaustive (near-)optimal-parse search for LZ77
+matches specifically, at higher host-side compute cost, but are still
+bounded by DEFLATE's own format ceiling (backref distances up to 32KB,
+lengths up to 258 bytes) regardless of parse quality - see the ratio
+numbers in `PROJECT_PLAN.md`'s M2/M3-adjacent sections for how that
+ceiling compares against zx0/shrinkler on the same test data.
 
 ## Depacker
 

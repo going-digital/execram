@@ -176,7 +176,7 @@ pub fn printInfo(
 fn backendIdName(id: u8) []const u8 {
     return switch (id) {
         0 => "store",
-        1 => "inflate-compatible (inflate or zultra)",
+        1 => "inflate-compatible (inflate, zultra, libdeflate, or zopfli)",
         2 => "zx0-compatible (zx0 or salvador)",
         3 => "shrinkler",
         else => "unknown",

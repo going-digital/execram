@@ -373,6 +373,77 @@ by renaming only Salvador's copy via compiler `-D` flags (see
 `build.zig`), no source edits needed. See
 `src/backends/salvador_vendor/README.md` and `docs/LICENSES.md` §7.
 
+**libdeflate — another alternative "inflate" compressor** ✅ done
+(unplanned addition, post-v1.1.0, [issue #1](https://github.com/going-digital/execram/issues/1))
+- vendored [ebiggers/libdeflate](https://github.com/ebiggers/libdeflate)'s
+raw-DEFLATE compressor at max level (`src/backends/libdeflate_vendor/`).
+Same shape as Zultra: standard raw DEFLATE, so **no new stub or
+backend_id** - `--backend=libdeflate` reuses `inflate`'s stub. Measured
+on two corpus programs:
+
+| backend | hexagon.exe | hexagon2.exe |
+|---|---:|---:|
+| inflate | 149656 B | 149562 B |
+| libdeflate | 143772 B | 143780 B |
+| zultra | 143029 B | 142871 B |
+
+~0.5% behind zultra, well ahead of `inflate` - kept as a real
+alternative but not folded into `--backend=most`'s two-backend set on
+this small a sample; added to `execram bench`'s default set instead.
+Verified by round-trip test + `pack -v` self-check; **not yet
+real-hardware tested** (no FS-UAE/ROM in this environment) - lower risk
+than a new stub since the depacker is unchanged, but
+`EXECRAM_TEST_BACKEND=libdeflate tests/uae/run_e2e_test.sh` is still the
+bar before a release. See `docs/LICENSES.md` §12.
+
+**Zopfli — a third alternative "inflate" compressor** ✅ done (same
+issue #1) - vendored [google/zopfli](https://github.com/google/zopfli)'s
+core (`ZopfliDeflate()` directly, no framing/CLI). Issue #1 named
+`zopfli-rs` (Rust), but that crate has no C ABI - wrapping it would mean
+a `cargo` build step and Rust cross-compilation in CI, a second
+toolchain this project doesn't need. Vendored the original C reference
+instead: same algorithm, drops into the same pattern. No new stub;
+also applied issue #1's own suggestion (`PatchDistanceCodesForBuggyDecoders`
+turned into a no-op - execram's own depacker isn't one of the decoders
+it exists to placate).
+
+| backend | hexagon.exe (packed) | hexagon2.exe payload |
+|---|---:|---:|
+| zultra | 144236 B | 142871 B |
+| zopfli | 144172 B | 142911 B |
+| libdeflate | 144976 B | 143780 B |
+
+A statistical tie with zultra (each wins one file by tens of bytes),
+both ahead of libdeflate - a genuine third contender, left out of
+`most` for now, added to `bench`'s default set. Vendoring surfaced one
+portability wrinkle: `lz77.c`'s word-at-a-time match compare
+(`*(size_t*)ptr`, same trick glibc's `memcmp` uses) is safe on every
+real target but trips Zig's Debug-build UBSan alignment trap -
+suppressed with `-fno-sanitize=alignment` in `build.zig`, same fix
+category as `shrinkler_shim.cpp`'s `-fno-sanitize=shift`. Same
+verification status as libdeflate above (round-trip + self-check
+verified, real-hardware pending). See `docs/LICENSES.md` §14.
+
+**Huffman-relength prototype** ❌ built, verified, measured no benefit,
+removed. Issue #1's second half (DeflOpt/defluff/deft4j-turtledeflate/
+columbo - post-compression DEFLATE recoding) exists to recover bits
+from a compressed artifact when the *original data is gone*; execram
+never loses that data, so most of what those tools do is already
+subsumed by running a stronger encoder directly. The one technique
+still valid with source in hand: decode a stream back to tokens,
+recompute provably-optimal Huffman lengths via package-merge (reused
+the vendored Zopfli's own `katajainen.c`), re-emit if smaller. Built as
+`src/deflate_relength.zig` (a full from-scratch DEFLATE codec), wired
+into every inflate-family backend, every candidate independently
+verified via Zig's own decoder before use - correctness held up,
+27/27 tests passed. But measured across all four backends on both
+corpus files: **zero net improvement, every time**. inflate/zultra/
+libdeflate/zopfli already produce Huffman-length-optimal-or-tied
+output for their own token streams - DeflOpt-class tools earn their
+keep against *weak* encoders, and nothing here is weak that way.
+Removed rather than shipped as dead weight; see `docs/LICENSES.md`
+§13's addendum for the fuller account.
+
 **M4 — Shrinkler-class backend** ✅ done
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
   is public-domain-equivalent and the rest of its codebase is permissive
