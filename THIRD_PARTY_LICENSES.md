@@ -127,7 +127,9 @@ the same upstream project, both by Yuta Mori - see
 `src/musashi_vendor/` (Karl Stenerud - see `docs/LICENSES.md` §11 and
 `src/musashi_vendor/README.md`; compiled directly into this binary via
 the `bench` command, not just a build/test-time tool the way vasm and
-vlink are).
+vlink are), and `src/backends/libdeflate_vendor/` (Eric Biggers and
+Google LLC - see `docs/LICENSES.md` §12 and
+`src/backends/libdeflate_vendor/README.md`).
 
 ```
 Permission is hereby granted, free of charge, to any person obtaining a
@@ -164,7 +166,8 @@ the full legal text.
 ## Apache License 2.0
 
 Applies to: `src/backends/zultra_vendor/huffman/huffutils.c` (Emmanuel
-Marty).
+Marty) and `src/backends/zopfli_vendor/` (Google Inc. - see
+`docs/LICENSES.md` §14 and `src/backends/zopfli_vendor/README.md`).
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may
 not use this file except in compliance with the License. You may obtain
@@ -172,8 +175,11 @@ a copy of the License at <https://www.apache.org/licenses/LICENSE-2.0>.
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-This file is included unmodified from upstream, so the Apache 2.0
-"state changes" marking requirement doesn't apply.
+`huffutils.c` is included unmodified from upstream, so the Apache 2.0
+"state changes" marking requirement doesn't apply to it. The Zopfli
+vendor tree *is* modified (`deflate.c`'s `PatchDistanceCodesForBuggyDecoders`
+turned into a no-op) - marked inline at the modification site itself,
+satisfying that requirement there instead of here.
 
 ## The Unlicense (Public Domain)
 

@@ -14,6 +14,8 @@ const store = @import("backends/store.zig");
 const inflate = @import("backends/inflate.zig");
 const zx0 = @import("backends/zx0.zig");
 const zultra = @import("backends/zultra.zig");
+const libdeflate = @import("backends/libdeflate.zig");
+const zopfli = @import("backends/zopfli.zig");
 const salvador = @import("backends/salvador.zig");
 const shrinkler = @import("backends/shrinkler.zig");
 const musashi_bench = @import("musashi_bench.zig");
@@ -42,7 +44,7 @@ const listing_inflate = @embedFile("stub_inflate_listing");
 const listing_zx0 = @embedFile("stub_zx0_listing");
 const listing_shrinkler = @embedFile("stub_shrinkler_listing");
 
-const backend_names = [_][]const u8{ "store", "inflate", "zultra", "zx0", "salvador", "shrinkler" };
+const backend_names = [_][]const u8{ "store", "inflate", "zultra", "libdeflate", "zopfli", "zx0", "salvador", "shrinkler" };
 
 /// `--backend=most`'s own backend set (and the default when `--backend`
 /// is omitted entirely) - zultra and salvador only, the two backends
@@ -61,15 +63,18 @@ const most_backend_names = [_][]const u8{ "zultra", "salvador" };
 /// src/backends/salvador.zig - so `zx0` itself adds a lot of wait
 /// with no comparison value most of the time: ~508s measured on
 /// tests/corpus/hexagon.exe, 221KB, versus salvador's ~13s for the
-/// same stub) are excluded by default. `execram bench --all` runs
-/// every backend in `backend_names` instead.
-const bench_default_backend_names = [_][]const u8{ "inflate", "zultra", "salvador", "shrinkler" };
+/// same stub) are excluded by default. `libdeflate` and `zopfli` are
+/// included alongside `zultra` (all three inflate-compatible) since
+/// none has yet been compared broadly enough to know which one
+/// deserves `--backend=most`'s slot - see PROJECT_PLAN.md.
+/// `execram bench --all` runs every backend in `backend_names` instead.
+const bench_default_backend_names = [_][]const u8{ "inflate", "zultra", "libdeflate", "zopfli", "salvador", "shrinkler" };
 
 const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|most|auto]
+    \\  execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|most|auto]
     \\               [--mem=chip|fast] [-v] [--flash] <in> <out>
     \\  execram info <packed-exe>
     \\  execram bench [--all] <in>
@@ -81,9 +86,11 @@ const usage =
     \\compression time. --backend=auto tries every backend, most and
     \\shrinkler and zx0 included, and keeps whichever produces the
     \\smallest output overall - slower, but leaves nothing on the table.
-    \\zultra and salvador are alternative compressors for the same
-    \\container/depacker "inflate" and "zx0" use respectively - both aim
-    \\for better ratios at the cost of host-side compression time.
+    \\zultra, libdeflate, zopfli, and salvador are alternative
+    \\compressors for the same container/depacker "inflate"
+    \\("zultra"/"libdeflate"/"zopfli") and "zx0" ("salvador") use
+    \\respectively - all aim for better ratios at the cost of host-side
+    \\compression time.
     \\shrinkler is a from-Shrinkler LZ + adaptive range coder backend
     \\with its own container/depacker - usually the smallest output of
     \\all, also the slowest to compress.
@@ -122,11 +129,12 @@ const usage =
     \\faster - treat these times as a best-case lower bound for
     \\comparing backends against each other, not a wall-clock guarantee.
     \\
-    \\bench defaults to inflate/zultra/salvador/shrinkler - store adds
-    \\no compression to compare, and zx0 shares salvador's exact
-    \\decompression cost (same container/depacker) for a much slower
-    \\host-side compress (minutes, not seconds, on a large executable).
-    \\--all runs every backend, store and zx0 included.
+    \\bench defaults to inflate/zultra/libdeflate/zopfli/salvador/
+    \\shrinkler - store adds no compression to compare, and zx0 shares
+    \\salvador's exact decompression cost (same container/depacker) for
+    \\a much slower host-side compress (minutes, not seconds, on a
+    \\large executable). --all runs every backend, store and zx0
+    \\included.
     \\
 ;
 
@@ -199,7 +207,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate|zultra|zx0|salvador|shrinkler|most|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|most|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -280,6 +288,18 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
         // raw-DEFLATE format as "inflate" - same backend_id, same stub,
         // see src/backends/zultra_vendor/README.md.
         .{ try zultra.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
+    else if (std.mem.eql(u8, backend_name, "libdeflate"))
+        // libdeflate is another host-side compressor producing the
+        // same raw-DEFLATE format as "inflate"/"zultra" - same
+        // backend_id, same stub, see
+        // src/backends/libdeflate_vendor/README.md.
+        .{ try libdeflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
+    else if (std.mem.eql(u8, backend_name, "zopfli"))
+        // zopfli is another host-side compressor producing the same
+        // raw-DEFLATE format as "inflate"/"zultra"/"libdeflate" - same
+        // backend_id, same stub, see
+        // src/backends/zopfli_vendor/README.md.
+        .{ try zopfli.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
     else if (std.mem.eql(u8, backend_name, "zx0"))
         .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0 }
     else if (std.mem.eql(u8, backend_name, "salvador"))
@@ -290,7 +310,7 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
     else if (std.mem.eql(u8, backend_name, "shrinkler"))
         .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, listing_shrinkler }
     else {
-        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'zx0'/'salvador'/'shrinkler'/'most'/'auto' exist so far", .{backend_name});
+        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'libdeflate'/'zopfli'/'zx0'/'salvador'/'shrinkler'/'most'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
     };
 
@@ -356,6 +376,10 @@ fn decompressWithBackend(allocator: std.mem.Allocator, backend_name: []const u8,
         return inflate.decompress(allocator, payload, expected_len)
     else if (std.mem.eql(u8, backend_name, "zultra"))
         return zultra.decompress(allocator, payload, expected_len)
+    else if (std.mem.eql(u8, backend_name, "libdeflate"))
+        return libdeflate.decompress(allocator, payload, expected_len)
+    else if (std.mem.eql(u8, backend_name, "zopfli"))
+        return zopfli.decompress(allocator, payload, expected_len)
     else if (std.mem.eql(u8, backend_name, "zx0"))
         return zx0.decompress(allocator, payload, expected_len)
     else if (std.mem.eql(u8, backend_name, "salvador"))
@@ -382,7 +406,7 @@ fn cmdInfo(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     // listed here.
     const known_stubs = [_]info.KnownStub{
         .{ .stub_name = "store", .bytes = stub_store },
-        .{ .stub_name = "inflate/zultra", .bytes = stub_inflate },
+        .{ .stub_name = "inflate/zultra/libdeflate/zopfli", .bytes = stub_inflate },
         .{ .stub_name = "zx0/salvador", .bytes = stub_zx0 },
         .{ .stub_name = "shrinkler", .bytes = stub_shrinkler },
     };
@@ -529,6 +553,8 @@ test {
     _ = inflate;
     _ = zx0;
     _ = zultra;
+    _ = libdeflate;
+    _ = zopfli;
     _ = salvador;
     _ = shrinkler;
     _ = musashi_bench;

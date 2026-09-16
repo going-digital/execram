@@ -15,6 +15,13 @@ execram always produces files with whatever stub its current build
 embeds, so there's no old-file/new-reader compatibility question the
 policy exists to guard.
 
+Also post-v1.0: a seventh and eighth backend, `libdeflate` and
+`zopfli`, were added reusing `backend_id` 1 (§4) and the existing
+`inflate` stub unmodified - same "no format or stub change" shape as
+`zultra`/`salvador` above, so no `version_major` bump here either. See
+`PROJECT_PLAN.md`'s libdeflate/Zopfli entries for their real-hardware
+verification status.
+
 ## 1. Two-layer model
 
 execram deliberately separates two concerns that Shrinkler couples
@@ -131,7 +138,7 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 | Value | Backend | Milestone |
 |------:|---------|-----------|
 | 0     | store (no compression) | M1 |
-| 1     | inflate (DEFLATE) | M2 (also used by the `zultra` CLI backend - an alternative, stronger DEFLATE *encoder* producing the same format for the same depacker; there's no separate `zultra` entry here because the container/stub don't need one) |
+| 1     | inflate (DEFLATE) | M2 (also used by the `zultra`, `libdeflate`, and `zopfli` CLI backends - alternative, stronger DEFLATE *encoders* producing the same format for the same depacker; there's no separate entry for any of them here because the container/stub don't need one) |
 | 2     | zx0 | M3 (also used by the `salvador` CLI backend - an alternative, optimal-parse ZX0 *encoder* producing the same format for the same depacker; there's no separate `salvador` entry here for the same reason there's no separate `zultra` entry above) |
 | 3     | shrinkler-class | M4 |
 | 4-254 | reserved for future backends | |

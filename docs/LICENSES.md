@@ -306,6 +306,8 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | Salvador — general codebase | zlib | Yes | Retain notice |
 | Salvador — `src/matchfinder.c` | CC0 1.0 | Yes | None |
 | Salvador — `src/libdivsufsort/` (different fork than Zultra's) | MIT | Yes | Retain notice |
+| libdeflate | MIT | Yes | Retain notice |
+| Zopfli | Apache 2.0 | Yes | Retain notice; mark changed files |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | Musashi | MIT | Yes (see §11) | Retain notice |
@@ -363,3 +365,91 @@ in any form, while Musashi now does, compiled directly into the
 `execram` binary that `execram bench` is part of - it meets
 `THIRD_PARTY_LICENSES.md`'s own scope ("travels with any
 redistribution" of execram) that it didn't when this was written.
+
+## 12. libdeflate — `ebiggers/libdeflate`
+
+Commit audited: `92e6a0db9fa848d742f9eb286c92afc60f2c3dda`
+
+"Heavily optimized library for DEFLATE/zlib/gzip compression and
+decompression" (issue #1's first suggestion) - another alternative
+host-side compressor for the `inflate` backend's existing depacker,
+same shape as Zultra (§6): produces standard raw DEFLATE, so no new
+depacker or backend_id is needed (`src/backends/libdeflate.zig`). Only
+the compressor half is vendored - decompression, zlib/gzip framing, and
+the CLI programs are not, per `src/backends/libdeflate_vendor/README.md`.
+
+- **Whole vendored subset:** MIT license (`Copyright 2016 Eric Biggers,
+  Copyright 2024 Google LLC`), verified against the project's own
+  `COPYING`, vendored verbatim at
+  `src/backends/libdeflate_vendor/COPYING`.
+
+Permissive, no copyleft; fine to vendor directly, honoring the notice.
+
+## 13. Post-compression DEFLATE recoders (issue #1's second half)
+
+Not integrated (or vendored) yet - noted here so a license read is on
+record before anyone reaches for one. Issue #1 also names DeflOpt,
+defluff, deft4j/turtledeflate, and columbo as post-compression
+Huffman/block recoding tools that operate on an already-valid DEFLATE
+stream (no new depacker needed, same shape as §12/§6/§7). Their license
+status differs sharply and should be (re-)checked at whichever point
+one is actually picked up, not assumed from this note:
+
+- **DeflOpt:** closed-source freeware, no published source and no
+  redistribution/adaptation license - not vendorable at all, only
+  usable (if at all) as an external, separately-installed tool a user
+  runs themselves, never bundled or linked into execram.
+- **defluff:** distributed as a forum-thread attachment (encode.su),
+  not a maintained repo with a clear license file as of this audit -
+  needs a real license read, not an assumption, before any vendoring.
+- **deft4j / turtledeflate:** both on GitHub; license unread as of this
+  audit.
+- **columbo:** on GitHub (`ace-dent/columbo`), alpha quality per its own
+  `Alpha testing` issue as of this audit; license unread.
+
+**Update:** none of these four ended up vendored. A prototype of the
+one technique among them still valid given execram's own architecture
+(source data is never lost here, unlike the use case these tools
+target) found zero real-world benefit and was removed - see
+`PROJECT_PLAN.md`'s "Huffman-relength prototype" entry. The license
+notes above are otherwise unaffected.
+
+## 14. Zopfli — `google/zopfli`
+
+Commit audited: `ccf9f0588d4a4509cb1040310ec122243e670ee6`
+
+Issue #1's second DEFLATE-compressor suggestion, vendored as the
+original C reference implementation (`libzopfli`'s core only, not
+`zopflipng` or the CLI) rather than the `zopfli-rs` Rust port also
+named there - `zopfli-rs` is a plain Rust `rlib` with no C ABI, and
+wrapping it would mean a `cargo`-based build step and Rust cross-
+compilation added to CI for every release target, a second toolchain
+this project doesn't otherwise need. The upstream C library is the
+reference implementation `zopfli-rs` itself ports, under the same
+license, and drops into the exact vendoring pattern already used for
+Zultra/Salvador/libdeflate. Another alternative host-side compressor
+for the `inflate` backend's existing depacker: produces standard raw
+DEFLATE, so no new depacker or backend_id is needed
+(`src/backends/zopfli.zig`).
+
+- **Whole vendored subset:** Apache License 2.0 (`Copyright 2011 Google
+  Inc.`), verified against the project's own `COPYING`, vendored
+  verbatim at `src/backends/zopfli_vendor/COPYING`. Same license as
+  Zultra's own `src/huffman/huffutils.c` (§6) - permissive but not
+  notice-free: redistribution must retain copyright/attribution
+  notices and mark modified files as changed.
+- **Modification:** `deflate.c`'s `PatchDistanceCodesForBuggyDecoders()`
+  - issue #1's own suggestion - turned into a no-op (marked inline at
+    its definition, per §4(b)'s "state changes made" requirement). That
+    function pads a block's distance-code Huffman table to at least 2
+    entries purely to work around bugs in zlib <=1.2.1 and some old
+    mobile phones; execram's own depacker isn't one of those, so the
+    workaround only cost bytes here for no benefit. See
+    `src/backends/zopfli_vendor/README.md`.
+
+Permissive, no copyleft; fine to vendor directly, honoring the notice
+and the changed-file marking above.
+
+Benchmarked against Zultra and libdeflate (§6, §12) - a statistical tie
+with Zultra, both ahead of libdeflate; see `PROJECT_PLAN.md`'s Zopfli
+entry for the numbers.

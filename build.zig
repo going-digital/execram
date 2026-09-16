@@ -268,6 +268,67 @@ pub fn build(b: *std.Build) void {
             },
         });
 
+        // The libdeflate backend's host-side compressor is vendored C
+        // (docs/LICENSES.md), same "alternative encoder, same inflate
+        // stub" shape as zultra/salvador above - see
+        // src/backends/libdeflate_vendor/README.md for exactly which
+        // upstream files this pulls in and why.
+        mod.addIncludePath(b.path("src/backends/libdeflate_vendor"));
+        mod.addCSourceFiles(.{
+            .root = b.path("src/backends/libdeflate_vendor"),
+            .files = &.{
+                "lib/deflate_compress.c",
+                "lib/utils.c",
+                // Compiled unconditionally on every target, matching
+                // upstream's own CMakeLists.txt: each guards its body
+                // behind X86_CPU_FEATURES_KNOWN/ARM_CPU_FEATURES_KNOWN
+                // and compiles to nothing on the arch it doesn't apply
+                // to.
+                "lib/x86/cpu_features.c",
+                "lib/arm/cpu_features.c",
+            },
+            .flags = &.{"-std=c99"},
+        });
+
+        // The zopfli backend's host-side compressor is vendored C
+        // (docs/LICENSES.md), same "alternative encoder, same inflate
+        // stub" shape as zultra/libdeflate above - see
+        // src/backends/zopfli_vendor/README.md for exactly which
+        // upstream files this pulls in, and the one documented
+        // modification (PatchDistanceCodesForBuggyDecoders turned into
+        // a no-op, per issue #1).
+        mod.addIncludePath(b.path("src/backends/zopfli_vendor"));
+        mod.addCSourceFiles(.{
+            .root = b.path("src/backends/zopfli_vendor"),
+            .files = &.{
+                "blocksplitter.c",
+                "cache.c",
+                "deflate.c",
+                "hash.c",
+                "katajainen.c",
+                "lz77.c",
+                "squeeze.c",
+                "tree.c",
+                "util.c",
+            },
+            // -fno-sanitize=alignment: lz77.c's GetMatch() compares 8
+            // (or 4) bytes at a time via `*(size_t*)scan ==
+            // *(size_t*)match` on arbitrary, not necessarily
+            // size_t-aligned, buffer offsets - the same word-at-a-time
+            // trick glibc's own memcmp uses, safe in practice on every
+            // real target this project builds execram itself for
+            // (x86_64/aarch64/arm host machines all tolerate unaligned
+            // integer loads). Zig's Debug builds add UBSan alignment-
+            // trapping to vendored C too, which aborts on this -
+            // confirmed not a real bug (release builds and every other
+            // C compiler accept it, and upstream Zopfli ships this
+            // exact code everywhere) - same category of issue as
+            // shrinkler_shim.cpp's own `-fno-sanitize=shift` below,
+            // suppressed the same way rather than editing vendored
+            // code to dodge a sanitizer upstream never built against.
+            .flags = &.{ "-std=c99", "-fno-sanitize=alignment" },
+        });
+
         // The shrinkler backend's host-side compressor is vendored C++
         // (docs/LICENSES.md #1), not C like the others - Shrinkler's
         // own LZ optimal parser/range coder (src/backends/shrinkler_vendor/README.md).
