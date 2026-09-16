@@ -584,4 +584,16 @@ pub fn build(b: *std.Build) void {
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_tests.step);
+    // `exe_tests` (test_module) and `exe` (exe_module) are deliberately
+    // separate Module objects (test_module's own comment above has the
+    // full reason: test-only anonymous imports must not leak into the
+    // plain `zig build`/`zig build run` path) - which means "zig build
+    // test" passing says nothing about zig-out/bin/execram, a real
+    // trap: a stub-source edit can be fully verified by the test suite
+    // while zig-out/bin/execram still runs the pre-edit build, silently,
+    // until something separately runs plain `zig build`/`run`. Depend on
+    // the install step here too so `zig build test` always leaves
+    // zig-out/bin/execram current, the same guarantee `run_step` already
+    // has one line up.
+    test_step.dependOn(b.getInstallStep());
 }
