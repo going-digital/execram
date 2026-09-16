@@ -18,6 +18,7 @@ const libdeflate = @import("backends/libdeflate.zig");
 const zopfli = @import("backends/zopfli.zig");
 const salvador = @import("backends/salvador.zig");
 const shrinkler = @import("backends/shrinkler.zig");
+const lz4 = @import("backends/lz4.zig");
 const musashi_bench = @import("musashi_bench.zig");
 
 /// M0 smoke test: proves the vasm -> Zig build pipeline works end to end.
@@ -34,8 +35,11 @@ const stub_store = @embedFile("stub_store");
 const stub_inflate = @embedFile("stub_inflate");
 const stub_zx0 = @embedFile("stub_zx0");
 const stub_shrinkler = @embedFile("stub_shrinkler");
+const stub_lz4small = @embedFile("stub_lz4small");
+const stub_lz4normal = @embedFile("stub_lz4normal");
+const stub_lz4fast = @embedFile("stub_lz4fast");
 
-/// vasm `-L` listings of the same four stubs, needed only by `execram
+/// vasm `-L` listings of the same stubs, needed only by `execram
 /// bench` (via src/musashi_bench.zig's `parseDepackOffset`) to locate
 /// each one's `Depack:` entry point - see that function's own doc
 /// comment on why a listing, not the `-Fbin` binary alone, is needed.
@@ -43,8 +47,11 @@ const listing_store = @embedFile("stub_store_listing");
 const listing_inflate = @embedFile("stub_inflate_listing");
 const listing_zx0 = @embedFile("stub_zx0_listing");
 const listing_shrinkler = @embedFile("stub_shrinkler_listing");
+const listing_lz4small = @embedFile("stub_lz4small_listing");
+const listing_lz4normal = @embedFile("stub_lz4normal_listing");
+const listing_lz4fast = @embedFile("stub_lz4fast_listing");
 
-const backend_names = [_][]const u8{ "store", "inflate", "zultra", "libdeflate", "zopfli", "zx0", "salvador", "shrinkler" };
+const backend_names = [_][]const u8{ "store", "inflate", "zultra", "libdeflate", "zopfli", "zx0", "salvador", "shrinkler", "lz4small", "lz4normal", "lz4fast" };
 
 /// `--backend=most`'s own backend set (and the default when `--backend`
 /// is omitted entirely) - zultra and salvador only, the two backends
@@ -66,15 +73,21 @@ const most_backend_names = [_][]const u8{ "zultra", "salvador" };
 /// same stub) are excluded by default. `libdeflate` and `zopfli` are
 /// included alongside `zultra` (all three inflate-compatible) since
 /// none has yet been compared broadly enough to know which one
-/// deserves `--backend=most`'s slot - see PROJECT_PLAN.md.
+/// deserves `--backend=most`'s slot - see PROJECT_PLAN.md. All three
+/// `lz4*` backends are included too, on purpose: they compress to
+/// identical payload bytes (one shared host encoder,
+/// src/backends/lz4.zig - see stubs/lz4/README.md), so appearing
+/// side by side in `bench`'s table with matching size/ratio columns
+/// and different decompression-cycle columns *is* the size-vs-speed
+/// trade-off this backend exists to make visible.
 /// `execram bench --all` runs every backend in `backend_names` instead.
-const bench_default_backend_names = [_][]const u8{ "inflate", "zultra", "libdeflate", "zopfli", "salvador", "shrinkler" };
+const bench_default_backend_names = [_][]const u8{ "inflate", "zultra", "libdeflate", "zopfli", "salvador", "shrinkler", "lz4small", "lz4normal", "lz4fast" };
 
 const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|most|auto]
+    \\  execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|most|auto]
     \\               [--mem=chip|fast] [-v] [--flash] <in> <out>
     \\  execram info <packed-exe>
     \\  execram bench [--all] <in>
@@ -94,6 +107,17 @@ const usage =
     \\shrinkler is a from-Shrinkler LZ + adaptive range coder backend
     \\with its own container/depacker - usually the smallest output of
     \\all, also the slowest to compress.
+    \\
+    \\lz4small/lz4normal/lz4fast are one LZ4HC compressor paired with
+    \\three different depacker stubs (72/180/3722 bytes) that trade
+    \\stub code size for decompression speed - all three produce the
+    \\exact same compressed payload, so unlike every other backend
+    \\pair here, choosing between them is a real speed-vs-size decision
+    \\for *your* program, not something execram can pick for you. LZ4's
+    \\own ratio is well behind the DEFLATE/ZX0-family backends above,
+    \\so these exist for programs where fast decompression (a loading
+    \\screen, a demo transition) matters more than squeezing out the
+    \\last few bytes - see `execram bench`.
     \\
     \\--mem overrides the Chip/Fast RAM choice that's otherwise
     \\auto-detected from the input's own hunk memory attributes (any
@@ -130,11 +154,11 @@ const usage =
     \\comparing backends against each other, not a wall-clock guarantee.
     \\
     \\bench defaults to inflate/zultra/libdeflate/zopfli/salvador/
-    \\shrinkler - store adds no compression to compare, and zx0 shares
-    \\salvador's exact decompression cost (same container/depacker) for
-    \\a much slower host-side compress (minutes, not seconds, on a
-    \\large executable). --all runs every backend, store and zx0
-    \\included.
+    \\shrinkler/lz4small/lz4normal/lz4fast - store adds no compression
+    \\to compare, and zx0 shares salvador's exact decompression cost
+    \\(same container/depacker) for a much slower host-side compress
+    \\(minutes, not seconds, on a large executable). --all runs every
+    \\backend, store and zx0 included.
     \\
 ;
 
@@ -207,7 +231,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|most|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|most|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -309,8 +333,19 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
         .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0 }
     else if (std.mem.eql(u8, backend_name, "shrinkler"))
         .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, listing_shrinkler }
+    else if (std.mem.eql(u8, backend_name, "lz4small"))
+        // lz4small/lz4normal/lz4fast share one host-side LZ4HC
+        // compressor (identical payload bytes) but each embeds a
+        // genuinely different depacker stub - own backend_id per
+        // variant, see src/container.zig's BackendId doc comment and
+        // stubs/lz4/README.md.
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_small, stub_lz4small, listing_lz4small }
+    else if (std.mem.eql(u8, backend_name, "lz4normal"))
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_normal, stub_lz4normal, listing_lz4normal }
+    else if (std.mem.eql(u8, backend_name, "lz4fast"))
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_fast, stub_lz4fast, listing_lz4fast }
     else {
-        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'libdeflate'/'zopfli'/'zx0'/'salvador'/'shrinkler'/'most'/'auto' exist so far", .{backend_name});
+        std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'libdeflate'/'zopfli'/'zx0'/'salvador'/'shrinkler'/'lz4small'/'lz4normal'/'lz4fast'/'most'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
     };
 
@@ -386,6 +421,10 @@ fn decompressWithBackend(allocator: std.mem.Allocator, backend_name: []const u8,
         return salvador.decompress(allocator, payload, expected_len)
     else if (std.mem.eql(u8, backend_name, "shrinkler"))
         return shrinkler.decompress(allocator, payload, expected_len)
+    else if (std.mem.eql(u8, backend_name, "lz4small") or
+        std.mem.eql(u8, backend_name, "lz4normal") or
+        std.mem.eql(u8, backend_name, "lz4fast"))
+        return lz4.decompress(allocator, payload, expected_len)
     else
         unreachable; // packWithBackend already validated backend_name above
 }
@@ -409,6 +448,9 @@ fn cmdInfo(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         .{ .stub_name = "inflate/zultra/libdeflate/zopfli", .bytes = stub_inflate },
         .{ .stub_name = "zx0/salvador", .bytes = stub_zx0 },
         .{ .stub_name = "shrinkler", .bytes = stub_shrinkler },
+        .{ .stub_name = "lz4small", .bytes = stub_lz4small },
+        .{ .stub_name = "lz4normal", .bytes = stub_lz4normal },
+        .{ .stub_name = "lz4fast", .bytes = stub_lz4fast },
     };
 
     var stdout_buffer: [4096]u8 = undefined;
@@ -557,5 +599,6 @@ test {
     _ = zopfli;
     _ = salvador;
     _ = shrinkler;
+    _ = lz4;
     _ = musashi_bench;
 }

@@ -308,6 +308,8 @@ are local/dev-machine-only and excluded from `.github/workflows/ci.yml`.
 | Salvador — `src/libdivsufsort/` (different fork than Zultra's) | MIT | Yes | Retain notice |
 | libdeflate | MIT | Yes | Retain notice |
 | Zopfli | Apache 2.0 | Yes | Retain notice; mark changed files |
+| LZ4/LZ4HC | BSD 2-Clause | Yes | Retain notice |
+| lz4-68k | MIT | Yes | Retain notice |
 | vasm | Custom (free for M68k/AmigaOS commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | vlink | Custom (free for AmigaOS/68k commercial use) | Use as external tool only; don't vendor the tool itself | None on our output |
 | Musashi | MIT | Yes (see §11) | Retain notice |
@@ -453,3 +455,53 @@ and the changed-file marking above.
 Benchmarked against Zultra and libdeflate (§6, §12) - a statistical tie
 with Zultra, both ahead of libdeflate; see `PROJECT_PLAN.md`'s Zopfli
 entry for the numbers.
+
+## 15. LZ4/LZ4HC — `lz4/lz4`
+
+Commit audited: `0774d05537f9762f838f7ab541b7765f1a729cb5`
+
+Host-side compressor for the new `lz4small`/`lz4normal`/`lz4fast`
+backends: `LZ4_compress_HC()` at its own maximum level, plus
+`LZ4_decompress_safe()` for the pack-time host-side self-check. Only
+four files vendored (`lz4.c`/`.h`, `lz4hc.c`/`.h`) - not the LZ4 Frame
+format or the file-API convenience wrapper, neither needed since this
+backend uses the raw block API directly (`src/backends/lz4_vendor/README.md`).
+
+- **All four files:** BSD 2-Clause (`Copyright (c) Yann Collet`),
+  verified against the project's own `lib/LICENSE`, vendored verbatim
+  at `src/backends/lz4_vendor/LICENSE`.
+
+Permissive, no copyleft; fine to vendor directly, honoring the notice.
+
+## 16. lz4-68k — `arnaud-carre/lz4-68k`
+
+Commit audited: `773f8a083764d2fd001408f65ffcb94ae8e13a6c`
+
+Three independent 68k depackers for the raw LZ4 block format above,
+trading depacker code size for decompression speed (72/180/3722 bytes
+- see `stubs/lz4/README.md` and `docs/algorithm-notes/lz4.md`). Unlike
+every other backend in this project, these three aren't alternative
+encoders sharing one depacker - they're one encoder paired with three
+genuinely different depackers, so each gets its own `backend_id`
+(`src/container.zig`).
+
+- **All three `.asm` files:** MIT license (`Copyright (c) 2021 Arnaud
+  Carré`), verified against the project's own `LICENSE`, vendored
+  verbatim at `stubs/lz4/LICENSE`.
+- **Modifications** (both documented inline at their exact location,
+  per good practice - MIT doesn't require marking changes the way
+  Apache 2.0 does):
+  - `lz4_normal.asm`: two `repeat 15 { ... }` blocks, a form
+    `vasmm68k_mot` doesn't support, mechanically unrolled into 15
+    literal copies of the same instruction each - verified
+    byte-for-byte, the unrolled file assembles to exactly upstream's
+    own documented 180 bytes.
+  - All three: wrapped in a `movem.l d2-d7/a2-a6,-(a7)` /
+    `bsr.w lz4_depack` / `movem.l (a7)+,d2-d7/a2-a6` pair
+    (`stubs/lz4/stub_{small,normal,fast}.s`) - none natively preserve
+    the registers `stubs/common/runtime.i`'s `Depack` contract
+    requires (they treat several as scratch, written for a simpler
+    calling convention than execram's).
+
+Permissive, no copyleft; fine to vendor/adapt directly, honoring the
+notice.

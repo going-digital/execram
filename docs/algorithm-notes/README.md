@@ -11,3 +11,4 @@ what was changed and why).
 - [inflate.md](inflate.md) - standard DEFLATE (`inflate`, `zultra`, `libdeflate`, and `zopfli`)
 - [zx0.md](zx0.md) - ZX0's depacker-minimal LZ77 (`zx0` and `salvador`)
 - [shrinkler.md](shrinkler.md) - LZ77 + adaptive range coding, the LZMA-family backend
+- [lz4.md](lz4.md) - LZ4, trading ratio for decompression speed (`lz4small`/`lz4normal`/`lz4fast`)

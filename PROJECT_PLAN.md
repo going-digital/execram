@@ -444,6 +444,75 @@ keep against *weak* encoders, and nothing here is weak that way.
 Removed rather than shipped as dead weight; see `docs/LICENSES.md`
 §13's addendum for the fuller account.
 
+**LZ4 — a speed-over-ratio backend (lz4small/lz4normal/lz4fast)** ✅
+done (unplanned addition, post-v1.1.0) - one host-side compressor
+(vendored `lz4/lz4`'s `LZ4_compress_HC()` at its own max level,
+`src/backends/lz4.zig`) paired with three independent depackers
+(vendored arnaud-carre/lz4-68k, MIT), each trading depacker code size
+for decompression speed rather than the usual ratio-vs-compression-time
+trade-off every other backend here makes. Unlike every prior addition,
+these three aren't alternative encoders sharing one depacker - they're
+one encoder, three genuinely different depackers - so each got its own
+`backend_id` (4/5/6, `src/container.zig`) instead of sharing one the
+way zultra/libdeflate/zopfli share `inflate`'s.
+
+Real numbers, `execram bench` on `tests/corpus/hexagon.exe`:
+
+| backend | packed size | ratio | decompress cycles |
+|---|---:|---:|---:|
+| lz4small | 169100 B | 76.5% | 8,880,674 |
+| lz4normal | 169208 B | 76.5% | 6,792,426 |
+| lz4fast | 172748 B | 78.1% | 4,042,114 |
+| zultra (for reference) | 144236 B | 65.2% | 43,928,880 |
+
+Confirms the whole premise: identical payload bytes across all three
+(only stub-size overhead moves the packed-size column), lz4fast
+decompresses ~2.2x faster than lz4small (matching upstream's own
+~2.36x claim on different test data), and even the slowest LZ4 variant
+is ~5x cheaper to decompress than zultra - at a real ratio cost (LZ4's
+own format ceiling is well behind DEFLATE/ZX0/Shrinkler's). Not
+included in `--backend=most` (ratio is the wrong axis for this
+backend to compete on); added to `execram bench`'s default set so the
+trade-off is visible without a special flag.
+
+`lz4_normal.asm` needed one mechanical fix: two `repeat 15 { ... }`
+blocks upstream wrote that `vasmm68k_mot` doesn't support, unrolled by
+hand into 15 literal copies each - verified byte-for-byte (the
+unrolled file assembles to exactly upstream's documented 180 bytes).
+All three depackers also needed real adapter code, unlike
+`unzx0_68000.s`: none preserve D2-D7/A2-A6 natively (several are
+treated as scratch), so each stub wraps the raw entry point in a
+`movem.l`/`bsr.w`/`movem.l` save-restore pair rather than auditing
+each variant's exact clobber set.
+
+Verified by the same host-side round-trip test every backend has
+(`src/backends/lz4.zig`, via the vendored library's own real
+`LZ4_decompress_safe()`, not a hand-written reference decoder), by
+`execram pack -v`'s self-check on both corpus files, and - unlike
+libdeflate/Zopfli, which only got the host-side checks above - **on
+real hardware**, for all three variants: `run_e2e_test.sh` and the
+byte-exact `run_large_e2e_test.sh` (real cross-hunk/self-hunk
+relocations, exact 4945-byte transcript match), the full
+`run_corpus_test.sh` matrix (no_relocs/chip_mem/bss_heavy/incompressible
+- 12/12 passed, including real Chip RAM residency and BSS-zero-clear
+checks), and `run_real_exe_test.sh` against both real corpus programs
+via a genuine AmigaDOS launch (hexagon.exe/hexagon2.exe, 626
+relocations each - 6/6 passed). One real environment finding along the
+way, worth recording since it cost real debugging time: the
+FS-UAE build bundled with the Bartman VSCode Amiga-debug extension is
+an x86_64 binary that only runs via Rosetta on this Apple Silicon
+Mac, and under that build the emulated CPU never produced any serial
+output at all even after 100+ real seconds - not just "slow," genuinely
+stuck (cause not fully isolated - possibly a debugger-oriented build
+defaulting to a paused/attached-wait state, given its own
+`--version` output identifies as `remote_debug`). The native, non-Rosetta
+`/Applications/FS-UAE.app` (the project's own documented default path)
+booted the plain sentinel test correctly in a few seconds, and every
+lz4 test above ran cleanly under it - a real lesson for this
+environment: prefer the native FS-UAE.app over the debugger-extension's
+bundled copy for these tests. See `stubs/lz4/README.md`, `src/backends/lz4_vendor/README.md`,
+and `docs/LICENSES.md` §15/§16.
+
 **M4 — Shrinkler-class backend** ✅ done
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
   is public-domain-equivalent and the rest of its codebase is permissive

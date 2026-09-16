@@ -69,6 +69,24 @@ const stubs = [_]Stub{
         .include_dir = "stubs/common",
         .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/shrinkler/ShrinklerDecompress.s" },
     },
+    .{
+        .name = "stub_lz4small",
+        .source = "stubs/lz4/stub_small.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_smallest.asm" },
+    },
+    .{
+        .name = "stub_lz4normal",
+        .source = "stubs/lz4/stub_normal.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_normal.asm" },
+    },
+    .{
+        .name = "stub_lz4fast",
+        .source = "stubs/lz4/stub_fast.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_fastest.asm" },
+    },
 };
 
 /// A real hunk executable built at test time (vasm assembles to a linkable
@@ -327,6 +345,21 @@ pub fn build(b: *std.Build) void {
             // suppressed the same way rather than editing vendored
             // code to dodge a sanitizer upstream never built against.
             .flags = &.{ "-std=c99", "-fno-sanitize=alignment" },
+        });
+
+        // The lz4small/lz4normal/lz4fast backends' shared host-side
+        // compressor is vendored C (docs/LICENSES.md) - one LZ4HC
+        // encoder for three depacker stubs, see
+        // src/backends/lz4_vendor/README.md for exactly which upstream
+        // files this pulls in (just lz4.c/lz4hc.c - lz4.h/lz4hc.h are
+        // include-only) and why compiling both as ordinary, separate
+        // translation units is upstream's own supported multi-file
+        // build, not a special case this project invented.
+        mod.addIncludePath(b.path("src/backends/lz4_vendor"));
+        mod.addCSourceFiles(.{
+            .root = b.path("src/backends/lz4_vendor"),
+            .files = &.{ "lz4.c", "lz4hc.c" },
+            .flags = &.{"-std=c99"},
         });
 
         // The shrinkler backend's host-side compressor is vendored C++

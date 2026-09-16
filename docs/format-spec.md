@@ -22,6 +22,12 @@ Also post-v1.0: a seventh and eighth backend, `libdeflate` and
 `PROJECT_PLAN.md`'s libdeflate/Zopfli entries for their real-hardware
 verification status.
 
+Also post-v1.0: `lz4small`/`lz4normal`/`lz4fast`, three genuinely new
+depacker stubs sharing one host-side LZ4HC encoder, added as
+`backend_id` 4/5/6 (§4) - purely additive (new enum values, `_` catch-
+all in `src/container.zig`'s `BackendId`), so still no `version_major`
+bump. See `PROJECT_PLAN.md`'s LZ4 entry.
+
 ## 1. Two-layer model
 
 execram deliberately separates two concerns that Shrinkler couples
@@ -141,7 +147,10 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 | 1     | inflate (DEFLATE) | M2 (also used by the `zultra`, `libdeflate`, and `zopfli` CLI backends - alternative, stronger DEFLATE *encoders* producing the same format for the same depacker; there's no separate entry for any of them here because the container/stub don't need one) |
 | 2     | zx0 | M3 (also used by the `salvador` CLI backend - an alternative, optimal-parse ZX0 *encoder* producing the same format for the same depacker; there's no separate `salvador` entry here for the same reason there's no separate `zultra` entry above) |
 | 3     | shrinkler-class | M4 |
-| 4-254 | reserved for future backends | |
+| 4     | lz4 (smallest depacker) | post-v1.1.0 (`lz4small` CLI backend) |
+| 5     | lz4 (normal depacker) | post-v1.1.0 (`lz4normal` CLI backend) |
+| 6     | lz4 (fastest depacker) | post-v1.1.0 (`lz4fast` CLI backend) - all three share one host-side LZ4HC encoder (identical payload bytes) but each embeds a genuinely different depacker stub, unlike every entry above, hence one ID per stub rather than one shared ID |
+| 7-254 | reserved for future backends | |
 | 255   | invalid / never emitted | tooling sentinel |
 
 ## 5. `flags` bitfield

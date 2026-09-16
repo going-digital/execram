@@ -14,11 +14,13 @@ interchangeable compression backends rather than just one.
   compressor never has to understand hunks or relocations itself.
 - **Compress.** One of several pluggable backends compresses that
   image: DEFLATE ([inflate](docs/algorithm-notes/inflate.md)),
-  [ZX0](docs/algorithm-notes/zx0.md), or [Shrinkler's own LZ77 +
-  adaptive range coder](docs/algorithm-notes/shrinkler.md) - plus
-  `zultra`, `libdeflate`, `zopfli`, and `salvador`, alternative,
-  stronger host-side compressors that reuse the inflate and ZX0
-  depackers respectively rather than needing stubs of their own.
+  [ZX0](docs/algorithm-notes/zx0.md), [Shrinkler's own LZ77 +
+  adaptive range coder](docs/algorithm-notes/shrinkler.md), or
+  [LZ4](docs/algorithm-notes/lz4.md) (trading ratio for much faster
+  decompression) - plus `zultra`, `libdeflate`, `zopfli`, and
+  `salvador`, alternative, stronger host-side compressors that reuse
+  the inflate and ZX0 depackers respectively rather than needing stubs
+  of their own.
 - **Package.** The compressed payload is wrapped with a small 68k
   depacker stub into a new two-hunk AmigaDOS executable: a tiny
   resident hunk sized for the decompressed program, and a scratch hunk
@@ -41,18 +43,24 @@ Prebuilt binaries for Linux (x86_64/aarch64/arm), macOS
 [Building](#building) below to build from source instead.
 
 ```sh
-execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|most|auto]
+execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|most|auto]
              [--mem=chip|fast] [-v] [--flash] <in> <out>
 ```
 
 Packs `<in>` into `<out>`. `--backend=most`, the default, tries
 `zultra` and `salvador` and keeps whichever is smaller - the two
 backends that usually win, without paying for an exhaustive search;
-`--backend=auto` tries all eight and keeps the smallest overall.
+`--backend=auto` tries all eleven and keeps the smallest overall.
 `shrinkler` - Shrinkler's own LZ + adaptive range coder, adapted rather
 than reimplemented - usually produces the smallest output of all, at
-the cost of the slowest host-side compression. Chip vs. Fast RAM is
-normally auto-detected from the input; `--mem` overrides it.
+the cost of the slowest host-side compression. `lz4small`/`lz4normal`/
+`lz4fast` are one LZ4HC compressor paired with three different
+depacker stubs (72/180/3722 bytes) that trade stub size for
+decompression speed - all three produce identical payload bytes, so
+picking between them is a real speed-vs-size call for your own
+program, not something execram decides for you (see `execram bench`).
+Chip vs. Fast RAM is normally auto-detected from the input; `--mem`
+overrides it.
 
 ```sh
 execram info <packed-exe>

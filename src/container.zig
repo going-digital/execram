@@ -10,6 +10,15 @@ pub const BackendId = enum(u8) {
     inflate = 1,
     zx0 = 2,
     shrinkler = 3,
+    /// One ID per distinct depacker stub (matching every other value
+    /// here), not per host encoder - the three lz4* CLI backends share
+    /// one host-side compressor (src/backends/lz4.zig) but each embeds
+    /// a genuinely different stub (stubs/lz4/README.md), unlike
+    /// zultra/libdeflate/zopfli, which share both stub *and* backend_id
+    /// with "inflate" because they share the exact same stub too.
+    lz4_small = 4,
+    lz4_normal = 5,
+    lz4_fast = 6,
     _,
 };
 

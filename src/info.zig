@@ -179,6 +179,9 @@ fn backendIdName(id: u8) []const u8 {
         1 => "inflate-compatible (inflate, zultra, libdeflate, or zopfli)",
         2 => "zx0-compatible (zx0 or salvador)",
         3 => "shrinkler",
+        4 => "lz4 (smallest depacker, 72 bytes)",
+        5 => "lz4 (normal depacker, 180 bytes)",
+        6 => "lz4 (fastest depacker, 3722 bytes)",
         else => "unknown",
     };
 }
