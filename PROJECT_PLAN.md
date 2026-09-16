@@ -564,6 +564,48 @@ raw diff) and independently verified by reassembling it to the exact
 byte size the fork's own README claims (138 bytes) before trusting it
 further - see `docs/LICENSES.md` §17 for why no commit hash is pinned
 the way every other entry there is.
+
+**Branch-size peephole audit** ✅ done - a user-prompted question ("any
+possible peephole optimisations to reduce 68000 code size?") turned
+into a full audit of every stub in the project via vasm's own
+assembled listings (real measured branch distances, not guesswork).
+Two findings:
+
+- `stubs/common/runtime.i` (and its std-syntax mirror,
+  `runtime_std.i`) had three `.w` branches whose real targets measure
+  well inside short-branch range (124/114/48 bytes) - `.s` instead,
+  6 bytes off *every* backend's stub, since this file is `include`d by
+  all of them. Every wrapper stub with an internal
+  `movem.l`/`bsr.w <vendored routine>`/`movem.l` pattern
+  (`zx0fast`/`salvadorfast`, `lz4small`/`lz4normal`/`lz4fast`,
+  `shrinkler`, `inflate`) had the same opportunity on that one call (6-8
+  bytes away), 2 more bytes each.
+- `stubs/inflate/inflate_core.s` (vendored Keir Fraser DEFLATE decoder,
+  Unlicense/public domain): 34 of 45 `.w` branches were short-range-
+  eligible, and fixing them exposed 2 more once the code shrank around
+  them (three passes to a fixed point) - **72 bytes** total, on the one
+  stub shared by `inflate`/`zultra`/`libdeflate`/`zopfli`. The file's
+  own header explains why: upstream's real source uses GNU-as's
+  auto-sizing `j<cc>` pseudo-branches, and the past adaptation to
+  vasm's std module made them explicit as the always-safe `.w` form
+  rather than computing which ones a byte displacement reaches - this
+  fix restores what the auto-sizing assembler would have chosen.
+  Checked every *other* vendored file the same way
+  (`unzx0_68000.s`/`unzx0_68000_fast.s`, all three `lz4*.asm` variants,
+  `ShrinklerDecompress.s`) and found zero opportunities in any of them
+  - already hand-tuned by their original demoscene authors.
+
+Net effect on `tests/corpus/hexagon2.exe`: `store`/`zx0`/`salvador`
+-6 B, `zx0fast`/`salvadorfast`/`lz4small`/`lz4normal`/`lz4fast`/
+`shrinkler` -8 B, `inflate` -80 B (6 + 2 + 72). Applies to every future
+packed executable, for free, with no ratio or format change at all -
+purely a smaller stub. Verified: every stub reassembles without a
+"branch out of range" error (vasm's own hard stop against exactly the
+mistake this kind of edit risks), the full host-side self-check suite
+(25/25), byte-exact `run_large_e2e_test.sh` on all seven affected
+backends, and `run_real_exe_test.sh` against both real corpus programs
+on all seven (14/14) - `inflate` specifically, since it carries by far
+the largest and most structurally complex change here.
 - License audit (§3) confirmed Shrinkler's depacker (`ShrinklerDecompress.S`)
   is public-domain-equivalent and the rest of its codebase is permissive
   attribution-only — so this backend directly adapts/ports Shrinkler's

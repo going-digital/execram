@@ -12,7 +12,7 @@
 
 Depack:
 	movem.l	d2/a2,-(sp)
-	bsr.w	zx0_decompress
+	bsr.s	zx0_decompress		; measured 8 bytes away - fits a short branch
 	movem.l	(sp)+,d2/a2
 	rts
 

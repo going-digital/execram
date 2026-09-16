@@ -61,9 +61,9 @@ Start:
 	lea	StubEnd(pc),a2		; a2 = header base, preserved throughout
 
 	cmp.l	#MAGIC,HDR_MAGIC(a2)
-	bne.w	Fail
+	bne.s	Fail			; measured 124 bytes away - fits a short branch
 	cmp.b	#VERSION_MAJOR_V0,HDR_VERSION_MAJOR(a2)
-	bne.w	Fail
+	bne.s	Fail			; measured 114 bytes away - fits a short branch
 
 	move.l	4.w,a6			; ExecBase
 
@@ -102,7 +102,7 @@ Start:
 
 	btst	#1,HDR_FLAGS(a2)	; FLAG_HAS_RELOCS
 	beq.s	.norelocs
-	bsr.w	RelocFixup
+	bsr.s	RelocFixup		; measured 48 bytes away - fits a short branch
 .norelocs:
 
 	; Clear BSS: this region of the buffer still holds whatever Depack/

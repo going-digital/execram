@@ -44,7 +44,7 @@ Depack:
 	add.l	#INFLATE_STORAGE_SIZE,d0
 	move.l	d0,a6			; a6 = *end* of scratch (OPT_STORAGE_OFFSTACK)
 
-	bsr.w	inflate
+	bsr.s	inflate			; measured 120 bytes away - fits a short branch
 
 	move.l	4.w,a6			; ExecBase again - inflate's own top-level
 					; entry deliberately doesn't preserve A6

@@ -42,7 +42,7 @@ Depack:
 	move.l	a2,-(sp)		; save the real header base
 	suba.l	a2,a2			; no progress callback
 	moveq	#1,d7			; parity context on (Shrinkler's own --data default)
-	bsr.w	ShrinklerDecompress
+	bsr.s	ShrinklerDecompress	; measured 6 bytes away - fits a short branch
 	move.l	(sp)+,a2		; restore it for runtime.i's own later use
 	rts
 

@@ -7,7 +7,7 @@
 
 Depack:
 	movem.l	d2-d7/a2-a6,-(a7)	; lz4_depack treats several of these as scratch - see README.md
-	bsr.w	lz4_depack
+	bsr.s	lz4_depack		; measured 8 bytes away - fits a short branch
 	movem.l	(a7)+,d2-d7/a2-a6
 	rts
 
