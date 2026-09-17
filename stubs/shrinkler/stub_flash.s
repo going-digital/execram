@@ -13,11 +13,11 @@
 Depack:
 	move.l	a2,-(sp)		; save the real header base
 	btst	#4,HDR_FLAGS(a2)	; FLAG_KILLTWITCH (a2 still valid here)
-	beq.s	.color19
+	beq.s	.color17
 	lea	$dff180,a3		; COLOR00 (border/background)
 	bra.s	.gotaddr
-.color19:
-	lea	$dff1a6,a3		; COLOR19 (mouse pointer sprite's own middle color) - default
+.color17:
+	lea	$dff1a2,a3		; COLOR17 (mouse pointer sprite's own middle color) - default
 .gotaddr:
 	suba.l	a2,a2			; no progress callback
 	moveq	#1,d7			; parity context on (Shrinkler's own --data default)

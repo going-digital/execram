@@ -13,7 +13,7 @@
 ; counted `.litcopy`/`.copy` loops (runs of 15+ literals/match bytes
 ; within a single token), so a long-running decompression keeps writing
 ; changing data to whichever hardware color register `a5` was loaded
-; with by this file's own stub_normal_flash.s wrapper (COLOR19 by
+; with by this file's own stub_normal_flash.s wrapper (COLOR17 by
 ; default, or COLOR00 with --killtwitch). The hand-unrolled short-run
 ; paths (`.small`/`.litcopys`, for runs under 15 bytes - the common
 ; case) are left untouched, matching lz4fast's own accepted

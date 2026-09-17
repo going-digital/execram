@@ -12,7 +12,7 @@
 ; flicker): a `move.w d0,(a5)` inserted after every byte copied in
 ; `.litcopy`/`.copy`, so a long-running decompression keeps writing
 ; changing data to whichever hardware color register `a5` was loaded
-; with by this file's own stub_small_flash.s wrapper (COLOR19 by
+; with by this file's own stub_small_flash.s wrapper (COLOR17 by
 ; default, or COLOR00 with --killtwitch). `a5` is unused anywhere in
 ; the original file (confirmed by direct inspection), so this is safe
 ; without disturbing any of its register conventions. See

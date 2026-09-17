@@ -1,6 +1,6 @@
 ; "store" backend's Depack: routine, flash-instrumented variant
 ; (docs/format-spec.md's in-loop decompression flicker) - identical to
-; depack_core.s except for the register-indirect COLOR19/COLOR00 poke
+; depack_core.s except for the register-indirect COLOR17/COLOR00 poke
 ; inside the hot copy loop. A separate file, not a shared/conditional
 ; one, matching this project's own established convention for near-
 ; identical stub variants (zx0 vs zx0fast, lz4small/normal/fast).
@@ -22,11 +22,11 @@
 ; outside this routine ever needs its value).
 Depack:
 	btst	#4,HDR_FLAGS(a2)	; FLAG_KILLTWITCH
-	beq.s	.color19
+	beq.s	.color17
 	lea	$dff180,a3		; COLOR00 (border/background)
 	bra.s	.gotaddr
-.color19:
-	lea	$dff1a6,a3		; COLOR19 (mouse pointer sprite's own middle color) - default
+.color17:
+	lea	$dff1a2,a3		; COLOR17 (mouse pointer sprite's own middle color) - default
 .gotaddr:
 
 	move.l	d0,d1

@@ -11,11 +11,11 @@
 
 Depack:
 	btst	#4,HDR_FLAGS(a2)	; FLAG_KILLTWITCH
-	beq.s	.color19
+	beq.s	.color17
 	lea	$dff180,a5		; COLOR00 (border/background)
 	bra.s	.gotaddr
-.color19:
-	lea	$dff1a6,a5		; COLOR19 (mouse pointer sprite's own middle color) - default
+.color17:
+	lea	$dff1a2,a5		; COLOR17 (mouse pointer sprite's own middle color) - default
 .gotaddr:
 	movem.l	d2-d7/a2-a6,-(a7)	; lz4_depack treats several of these as scratch - see README.md
 	bsr.s	lz4_depack

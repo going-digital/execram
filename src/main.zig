@@ -42,7 +42,7 @@ const stub_lz4fast = @embedFile("stub_lz4fast");
 
 /// Flash-instrumented sibling of each stub above (docs/format-spec.md's
 /// in-loop decompression flicker) - a separately-assembled binary per
-/// backend with the COLOR19/COLOR00 poke baked directly into its hot
+/// backend with the COLOR17/COLOR00 poke baked directly into its hot
 /// decode loop (stubs/*/stub_*_flash.s), swapped in by packWithBackend
 /// whenever --flash decides this file should flicker. There is no
 /// runtime branch between these and the plain stubs above - see
@@ -190,7 +190,7 @@ const usage =
     \\-v prints per-backend sizes (in --backend=auto mode) and image
     \\statistics as packing proceeds, not just the final result.
     \\
-    \\--flash writes changing data to COLOR19 (the mouse pointer
+    \\--flash writes changing data to COLOR17 (the mouse pointer
     \\sprite's own middle colour, visible as a flicker even with no
     \\real pointer sprite active) on every iteration of the chosen
     \\backend's decompression loop, so a slow decompress (shrinkler on
@@ -200,7 +200,7 @@ const usage =
     \\default) enables it only when this file's own measured
     \\decompression time exceeds 1 second; --flash=on always enables
     \\it; --flash=off never does. --killtwitch redirects the target to
-    \\COLOR00 (border/background) instead of COLOR19, for programs that
+    \\COLOR00 (border/background) instead of COLOR17, for programs that
     \\already use the mouse pointer sprite for something else during
     \\decompression; it has no effect when flashing itself is off.
     \\

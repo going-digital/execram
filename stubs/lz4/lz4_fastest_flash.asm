@@ -15,7 +15,7 @@
 ; jmp 0(a3,d0.w)` sequence that recurs after each unrolled copy block),
 ; so a long-running decompression keeps writing changing data to
 ; whichever hardware color register `a5` was loaded with by this
-; file's own stub_fast_flash.s wrapper (COLOR19 by default, or COLOR00
+; file's own stub_fast_flash.s wrapper (COLOR17 by default, or COLOR00
 ; with --killtwitch). This file has no shared per-byte copy loop at all
 ; (fully unrolled via a 256-entry jump table into hand-duplicated
 ; `move.b` chains - see the MODIFIED note further down), and several of
@@ -46,12 +46,12 @@ lz4_depack:
 			moveq	#0,d3
 			moveq	#16,d7
 
-;-------------------------------------------------------------------			
-;		
+;-------------------------------------------------------------------
+;
 ; this part is generated
 ;
-;-------------------------------------------------------------------			
-		
+;-------------------------------------------------------------------
+
 
 		lea		lz4jmp(pc),a3
 		moveq	#0,d0

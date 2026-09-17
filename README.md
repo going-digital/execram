@@ -72,7 +72,7 @@ two-hunk layout.
 
 `--flash=auto` (the default) makes a slow decompression (Shrinkler on
 a large file can take tens of seconds of real 68000 time) write
-changing data to `COLOR19` (the mouse pointer sprite's own middle
+changing data to `COLOR17` (the mouse pointer sprite's own middle
 colour) on every iteration of the decode loop, so the screen keeps
 visibly flickering for as long as the machine is still working instead
 of sitting blank with no sign it hasn't hung - enabled automatically

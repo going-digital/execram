@@ -87,7 +87,7 @@ const stubs = [_]Stub{
     },
     // Flash-instrumented variants (docs/format-spec.md's in-loop
     // decompression flicker) - a separately-assembled stub per backend
-    // with the COLOR19/COLOR00 poke baked directly into its hot decode
+    // with the COLOR17/COLOR00 poke baked directly into its hot decode
     // loop, chosen over a shared-stub runtime branch since this cost
     // sits inside a loop that runs tens of thousands to millions of
     // times (see stubs/*/stub_*_flash.s's own header comments).

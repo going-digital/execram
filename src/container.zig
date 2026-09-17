@@ -60,7 +60,7 @@ const FLAG_FLASH: u8 = 4;
 /// compatibility question to guard (docs/format-spec.md §9).
 const FLAG_OVERLAP: u8 = 8;
 /// Only meaningful when FLAG_FLASH is set: redirects the in-loop
-/// flicker's target from COLOR19 ($dff1a6, the mouse pointer sprite's
+/// flicker's target from COLOR17 ($dff1a2, the mouse pointer sprite's
 /// own middle color - the default) to COLOR00 ($dff180, the border/
 /// background color) instead. See stubs/common/header.i's own comment
 /// for where each flash-instrumented stub reads this.

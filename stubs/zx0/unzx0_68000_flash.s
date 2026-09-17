@@ -56,10 +56,10 @@
 
 Depack:
                btst #4,HDR_FLAGS(a2) ; FLAG_KILLTWITCH
-               beq.s .color19
+               beq.s .color17
                lea $dff180,a3        ; COLOR00 (border/background)
                bra.s .gotaddr
-.color19:      lea $dff1a6,a3        ; COLOR19 (mouse pointer sprite's own middle color) - default
+.color17:      lea $dff1a2,a3        ; COLOR17 (mouse pointer sprite's own middle color) - default
 .gotaddr:
 
                movem.l a2/d2,-(sp)  ; preserve registers

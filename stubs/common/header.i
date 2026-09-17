@@ -44,7 +44,7 @@ FLAG_FLASH		=	4
 ; always-0 it is when this flag is clear.
 FLAG_OVERLAP		=	8
 ; Only meaningful when FLAG_FLASH is set: redirects the in-loop flicker
-; target from COLOR19 ($dff1a6, the mouse pointer sprite's own middle
+; target from COLOR17 ($dff1a2, the mouse pointer sprite's own middle
 ; color - the default, invisible-pointer-safe choice) to COLOR00
 ; ($dff180, the border/background color) instead. Read once per
 ; instrumented backend's own stub_*_flash.s wrapper, before the header
