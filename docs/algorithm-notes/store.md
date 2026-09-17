@@ -63,3 +63,19 @@ what decides the allocated size for this specific backend. `--overlap=auto`
 often prefers the disjoint layout for `store` as a result: the overlap
 layout only wins on peak memory when there's real compression to avoid
 double-buffering, and `store` provides none.
+
+## In-loop decompression flicker
+
+`store` is the one backend where the header pointer register (A2) itself
+looked free to reuse at first glance - wrong: `stubs/common/runtime.i`'s
+own `Start:` re-reads `HDR_FLAGS`/`HDR_CODE_DATA_SIZE`/`HDR_BSS_SIZE`
+via A2 *after* `Depack` returns (`RelocFixup`, the BSS re-clear), so its
+flash-instrumented stub (`stubs/store/stub_flash.s` +
+`stubs/store/depack_core_flash.s`, `docs/format-spec.md` §8c) uses A3
+instead - genuinely unused anywhere in the plain copy loop - loaded once
+at the top of `Depack:` while A2 still holds the real header pointer.
+The poke (`move.w d0,(a3)`, the longword just copied) lands right after
+the loop's own `move.l (a0)+,(a1)+`, so it flickers on every longword
+written - the coarsest per-iteration granularity of any backend (4 bytes
+per poke instead of 1), simply because store's own copy loop already
+moves a longword at a time.

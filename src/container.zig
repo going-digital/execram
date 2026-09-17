@@ -38,12 +38,14 @@ pub const BackendId = enum(u8) {
 
 const FLAG_MEM_CHIP: u8 = 1;
 const FLAG_HAS_RELOCS: u8 = 2;
-/// docs/format-spec.md §5: a purely cosmetic border-colour flash while
-/// `Depack:` runs (stubs/common/runtime.i's own comment has the full
-/// rationale) - additive and backward-compatible (an old stub built
-/// before this existed would just ignore the bit, same as any other
-/// reserved one), hence the version_minor bump below rather than a
-/// version_major one.
+/// Purely informational: whether `stub_bytes` is this backend's
+/// flicker-instrumented stub variant (a per-backend `stub_*_flash`
+/// binary, chosen at pack time - see src/main.zig's `packWithBackend`)
+/// rather than its plain one. There's no runtime branch on this bit
+/// anymore (unlike FLAG_OVERLAP below) - stub *selection* is what
+/// actually enables the in-loop flicker, since it lives inside each
+/// backend's own hot decode loop, not in the one shared runtime.i
+/// every backend's stub includes.
 const FLAG_FLASH: u8 = 4;
 /// docs/format-spec.md §5, §8: true overlap-in-place decompression -
 /// the compressed payload lives at the resident hunk's own tail instead
@@ -53,6 +55,12 @@ const FLAG_FLASH: u8 = 4;
 /// carries its own matching stub, so there's no old-file/new-reader
 /// compatibility question to guard (docs/format-spec.md §9).
 const FLAG_OVERLAP: u8 = 8;
+/// Only meaningful when FLAG_FLASH is set: redirects the in-loop
+/// flicker's target from COLOR19 ($dff1a6, the mouse pointer sprite's
+/// own middle color - the default) to COLOR00 ($dff180, the border/
+/// background color) instead. See stubs/common/header.i's own comment
+/// for where each flash-instrumented stub reads this.
+const FLAG_KILLTWITCH: u8 = 16;
 /// docs/format-spec.md §3: 32 bytes through v1.0, grown to 36 for
 /// `trampoline_size` (docs/format-spec.md §8b's `OverlapPayloadOffset`
 /// needs it; see that field's own doc below) - additive, same
@@ -83,6 +91,7 @@ const MAGIC = 0x45784372; // "ExCr"
 /// unconditionally regardless of layout (docs/format-spec.md §8b's
 /// `OverlapPayloadOffset` needs it; the disjoint layout's own runtime
 /// path simply never reads it, same as any other field it doesn't need).
+/// `killtwitch` only matters when `flash` is true (see FLAG_KILLTWITCH).
 pub fn buildContainer(
     allocator: std.mem.Allocator,
     image: flatten.FlatImage,
@@ -90,6 +99,7 @@ pub fn buildContainer(
     stub_bytes: []const u8,
     compressed_payload: []const u8,
     flash: bool,
+    killtwitch: bool,
     overlap_margin: ?u32,
     trampoline_size: u32,
 ) ![]u8 {
@@ -97,6 +107,7 @@ pub fn buildContainer(
     if (image.mem_chip) flags |= FLAG_MEM_CHIP;
     if (image.reloc_stream.len > 1) flags |= FLAG_HAS_RELOCS; // len 1 is just the 0xFE terminator: no sites
     if (flash) flags |= FLAG_FLASH;
+    if (flash and killtwitch) flags |= FLAG_KILLTWITCH;
     const is_overlap = overlap_margin != null;
     if (is_overlap) flags |= FLAG_OVERLAP;
 
@@ -109,7 +120,7 @@ pub fn buildContainer(
     @memset(h, 0);
     std.mem.writeInt(u32, h[0..4], MAGIC, .big);
     h[4] = 0; // version_major
-    h[5] = 2; // version_minor: bumped for FLAG_OVERLAP/trampoline_size (docs/format-spec.md §9; previously bumped to 1 for FLAG_FLASH)
+    h[5] = 3; // version_minor: bumped for FLAG_KILLTWITCH (docs/format-spec.md §9; previously 2 for FLAG_OVERLAP/trampoline_size, 1 for FLAG_FLASH)
     h[6] = @intFromEnum(backend_id);
     h[7] = flags;
     std.mem.writeInt(u16, h[8..10], HEADER_SIZE, .big);
@@ -351,14 +362,14 @@ test "buildContainer serializes the header per docs/format-spec.md" {
 
     const stub = "STUB";
     const payload = "PAYLOAD!"; // 8 bytes, arbitrary for this test
-    const out = try buildContainer(std.testing.allocator, image, .store, stub, payload, false, null, 7);
+    const out = try buildContainer(std.testing.allocator, image, .store, stub, payload, false, false, null, 7);
     defer std.testing.allocator.free(out);
 
     try std.testing.expectEqualSlices(u8, stub, out[0..4]);
     const h = out[4..40];
     try std.testing.expectEqual(@as(u32, MAGIC), std.mem.readInt(u32, h[0..4], .big));
     try std.testing.expectEqual(@as(u8, 0), h[4]); // version_major
-    try std.testing.expectEqual(@as(u8, 2), h[5]); // version_minor (bumped for FLAG_OVERLAP)
+    try std.testing.expectEqual(@as(u8, 3), h[5]); // version_minor (bumped for FLAG_KILLTWITCH)
     try std.testing.expectEqual(@as(u8, @intFromEnum(BackendId.store)), h[6]); // backend_id
     try std.testing.expectEqual(FLAG_MEM_CHIP, h[7]); // chip set, has_relocs/flash/overlap clear
     try std.testing.expectEqual(@as(u16, HEADER_SIZE), std.mem.readInt(u16, h[8..10], .big));
@@ -381,10 +392,34 @@ test "buildContainer sets FLAG_FLASH when asked" {
     };
     defer image.deinit();
 
-    const out = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", true, null, 7);
+    const out = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", true, false, null, 7);
     defer std.testing.allocator.free(out);
 
     try std.testing.expectEqual(FLAG_FLASH, out[4..40][7]);
+}
+
+test "buildContainer sets FLAG_KILLTWITCH only alongside FLAG_FLASH" {
+    var image = flatten.FlatImage{
+        .allocator = std.testing.allocator,
+        .code_data = try std.testing.allocator.dupe(u8, &.{ 1, 2, 3, 4 }),
+        .bss_size = 0,
+        .reloc_stream = try std.testing.allocator.dupe(u8, &.{0xFE}),
+        .mem_chip = false,
+    };
+    defer image.deinit();
+
+    // flash=true, killtwitch=true: both bits set.
+    const out1 = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", true, true, null, 7);
+    defer std.testing.allocator.free(out1);
+    try std.testing.expectEqual(FLAG_FLASH | FLAG_KILLTWITCH, out1[4..40][7]);
+
+    // flash=false, killtwitch=true: killtwitch is meaningless without
+    // flash, so it must NOT be set - a --killtwitch pass with no actual
+    // flashing shouldn't silently claim a target register that's never
+    // used.
+    const out2 = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", false, true, null, 7);
+    defer std.testing.allocator.free(out2);
+    try std.testing.expectEqual(@as(u8, 0), out2[4..40][7]);
 }
 
 test "buildContainer sets FLAG_OVERLAP and safety_margin when given a margin" {
@@ -397,7 +432,7 @@ test "buildContainer sets FLAG_OVERLAP and safety_margin when given a margin" {
     };
     defer image.deinit();
 
-    const out = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", false, 1234, 7);
+    const out = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", false, false, 1234, 7);
     defer std.testing.allocator.free(out);
 
     const h = out[4..40];
@@ -415,7 +450,7 @@ test "buildContainer leaves FLAG_OVERLAP clear and safety_margin 0 when overlap_
     };
     defer image.deinit();
 
-    const out = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", false, null, 7);
+    const out = try buildContainer(std.testing.allocator, image, .store, "STUB", "PAYLOAD!", false, false, null, 7);
     defer std.testing.allocator.free(out);
 
     const h = out[4..40];

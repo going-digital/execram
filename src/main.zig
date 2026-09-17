@@ -40,6 +40,23 @@ const stub_lz4small = @embedFile("stub_lz4small");
 const stub_lz4normal = @embedFile("stub_lz4normal");
 const stub_lz4fast = @embedFile("stub_lz4fast");
 
+/// Flash-instrumented sibling of each stub above (docs/format-spec.md's
+/// in-loop decompression flicker) - a separately-assembled binary per
+/// backend with the COLOR19/COLOR00 poke baked directly into its hot
+/// decode loop (stubs/*/stub_*_flash.s), swapped in by packWithBackend
+/// whenever --flash decides this file should flicker. There is no
+/// runtime branch between these and the plain stubs above - see
+/// stubs/common/runtime.i's own comment on why FLAG_FLASH is purely
+/// informational now.
+const stub_store_flash = @embedFile("stub_store_flash");
+const stub_inflate_flash = @embedFile("stub_inflate_flash");
+const stub_zx0_flash = @embedFile("stub_zx0_flash");
+const stub_zx0fast_flash = @embedFile("stub_zx0fast_flash");
+const stub_shrinkler_flash = @embedFile("stub_shrinkler_flash");
+const stub_lz4small_flash = @embedFile("stub_lz4small_flash");
+const stub_lz4normal_flash = @embedFile("stub_lz4normal_flash");
+const stub_lz4fast_flash = @embedFile("stub_lz4fast_flash");
+
 /// vasm `-L` listings of the same stubs, needed only by `execram
 /// bench` (via src/musashi_bench.zig's `parseDepackOffset`) to locate
 /// each one's `Depack:` entry point - see that function's own doc
@@ -52,6 +69,19 @@ const listing_shrinkler = @embedFile("stub_shrinkler_listing");
 const listing_lz4small = @embedFile("stub_lz4small_listing");
 const listing_lz4normal = @embedFile("stub_lz4normal_listing");
 const listing_lz4fast = @embedFile("stub_lz4fast_listing");
+
+/// Listings for the flash stubs above - only needed by this file's own
+/// "flash stub self-check" test below (locating each one's `Depack:`
+/// offset for `musashi_bench.timeDepack`, exactly like the plain
+/// listings above serve `execram bench`); never used by non-test code.
+const listing_store_flash = @embedFile("stub_store_flash_listing");
+const listing_inflate_flash = @embedFile("stub_inflate_flash_listing");
+const listing_zx0_flash = @embedFile("stub_zx0_flash_listing");
+const listing_zx0fast_flash = @embedFile("stub_zx0fast_flash_listing");
+const listing_shrinkler_flash = @embedFile("stub_shrinkler_flash_listing");
+const listing_lz4small_flash = @embedFile("stub_lz4small_flash_listing");
+const listing_lz4normal_flash = @embedFile("stub_lz4normal_flash_listing");
+const listing_lz4fast_flash = @embedFile("stub_lz4fast_flash_listing");
 
 const backend_names = [_][]const u8{ "store", "inflate", "zultra", "libdeflate", "zopfli", "zx0", "salvador", "shrinkler", "lz4small", "lz4normal", "lz4fast", "zx0fast", "salvadorfast" };
 
@@ -93,7 +123,8 @@ const usage =
     \\
     \\Usage:
     \\  execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|most|auto]
-    \\               [--mem=chip|fast] [--overlap=on|off|auto] [-v] [--flash] <in> <out>
+    \\               [--mem=chip|fast] [--overlap=on|off|auto] [-v]
+    \\               [--flash=on|off|auto] [--killtwitch] <in> <out>
     \\  execram info <packed-exe>
     \\  execram bench [--all] <in>
     \\  execram --version
@@ -159,12 +190,19 @@ const usage =
     \\-v prints per-backend sizes (in --backend=auto mode) and image
     \\statistics as packing proceeds, not just the final result.
     \\
-    \\--flash sets the border colour (COLOR00) to a fixed bright colour
-    \\just before decompression starts and restores it to black just
-    \\after - a purely cosmetic "something is happening" indicator for
-    \\slow backends (shrinkler on a large file can take tens of seconds
-    \\of real 68000 time - see `execram bench`), with nothing else on
-    \\screen otherwise to show the machine hasn't hung.
+    \\--flash writes changing data to COLOR19 (the mouse pointer
+    \\sprite's own middle colour, visible as a flicker even with no
+    \\real pointer sprite active) on every iteration of the chosen
+    \\backend's decompression loop, so a slow decompress (shrinkler on
+    \\a large file can take tens of seconds of real 68000 time - see
+    \\`execram bench`) keeps showing the machine hasn't hung, not just
+    \\a static "something is happening" indicator. --flash=auto (the
+    \\default) enables it only when this file's own measured
+    \\decompression time exceeds 1 second; --flash=on always enables
+    \\it; --flash=off never does. --killtwitch redirects the target to
+    \\COLOR00 (border/background) instead of COLOR19, for programs that
+    \\already use the mouse pointer sprite for something else during
+    \\decompression; it has no effect when flashing itself is off.
     \\
     \\Every pack self-checks before writing anything: the chosen
     \\backend's compressed output is decompressed host-side and compared
@@ -237,7 +275,8 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     var backend_name: []const u8 = "most";
     var mem_override: ?bool = null; // true = force chip, false = force fast/any
     var verbose = false;
-    var flash = false;
+    var flash_mode: FlashMode = .auto;
+    var killtwitch = false;
     var overlap_mode: OverlapMode = .auto;
     var positional: std.ArrayList([]const u8) = .empty;
     for (args) |arg| {
@@ -267,14 +306,26 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
             }
         } else if (std.mem.eql(u8, arg, "-v")) {
             verbose = true;
-        } else if (std.mem.eql(u8, arg, "--flash")) {
-            flash = true;
+        } else if (std.mem.startsWith(u8, arg, "--flash=")) {
+            const v = arg["--flash=".len..];
+            if (std.mem.eql(u8, v, "on")) {
+                flash_mode = .on;
+            } else if (std.mem.eql(u8, v, "off")) {
+                flash_mode = .off;
+            } else if (std.mem.eql(u8, v, "auto")) {
+                flash_mode = .auto;
+            } else {
+                std.log.err("--flash must be 'on', 'off', or 'auto', got '{s}'", .{v});
+                return error.InvalidArguments;
+            }
+        } else if (std.mem.eql(u8, arg, "--killtwitch")) {
+            killtwitch = true;
         } else {
             try positional.append(arena, arg);
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|zx0fast|salvadorfast|most|auto] [--mem=chip|fast] [--overlap=on|off|auto] [-v] [--flash] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|zx0fast|salvadorfast|most|auto] [--mem=chip|fast] [--overlap=on|off|auto] [-v] [--flash=on|off|auto] [--killtwitch] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -304,11 +355,11 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     const exe_bytes, const used_backend = if (std.mem.eql(u8, backend_name, "auto"))
-        try packBest(arena, image, &backend_names, verbose, flash, overlap_mode)
+        try packBest(arena, image, &backend_names, verbose, flash_mode, killtwitch, overlap_mode)
     else if (std.mem.eql(u8, backend_name, "most"))
-        try packBest(arena, image, &most_backend_names, verbose, flash, overlap_mode)
+        try packBest(arena, image, &most_backend_names, verbose, flash_mode, killtwitch, overlap_mode)
     else
-        .{ try packWithBackend(arena, image, backend_name, verbose, flash, overlap_mode), backend_name };
+        .{ try packWithBackend(arena, image, backend_name, verbose, flash_mode, killtwitch, overlap_mode), backend_name };
 
     try cwd.writeFile(io, .{ .sub_path = out_path, .data = exe_bytes });
 
@@ -325,16 +376,24 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
 /// footprint for this specific file, per backend.
 const OverlapMode = enum { on, off, auto };
 
+/// `--flash`'s own three states, mirroring `OverlapMode` exactly: `off`
+/// never embeds a flash-instrumented stub; `on` always does (every
+/// backend has one now, so there's no fallback case to warn about,
+/// unlike `--overlap=on`); `auto` (the default) embeds one only when
+/// this file's own measured decompression time
+/// (CompressedBackend.seconds) exceeds 1 second.
+const FlashMode = enum { on, off, auto };
+
 /// Tries every backend in `names` and returns the smallest resulting
 /// output, along with which backend produced it - Shrinkler's own "just
 /// try it" approach to backend selection (PROJECT_PLAN.md M3), backing
 /// both `--backend=most` (`most_backend_names`) and `--backend=auto`
 /// (`backend_names`).
-fn packBest(arena: std.mem.Allocator, image: flatten.FlatImage, names: []const []const u8, verbose: bool, flash: bool, overlap_mode: OverlapMode) !struct { []u8, []const u8 } {
+fn packBest(arena: std.mem.Allocator, image: flatten.FlatImage, names: []const []const u8, verbose: bool, flash_mode: FlashMode, killtwitch: bool, overlap_mode: OverlapMode) !struct { []u8, []const u8 } {
     var best: ?[]u8 = null;
     var best_name: []const u8 = "";
     for (names) |name| {
-        const candidate = try packWithBackend(arena, image, name, verbose, flash, overlap_mode);
+        const candidate = try packWithBackend(arena, image, name, verbose, flash_mode, killtwitch, overlap_mode);
         if (best == null or candidate.len < best.?.len) {
             best = candidate;
             best_name = name;
@@ -347,6 +406,10 @@ const CompressedBackend = struct {
     payload: []u8,
     backend_id: container.BackendId,
     stub_bytes: []const u8,
+    /// This backend's flash-instrumented sibling stub (stubs/*/stub_*_flash.s)
+    /// - a drop-in replacement for `stub_bytes` wherever --flash decides
+    /// this file should flicker (packWithBackend's own `use_flash`).
+    flash_stub_bytes: []const u8,
     /// Only used by `execram bench` (musashi_bench.parseDepackOffset) -
     /// see that command's own comment on why it's threaded through here
     /// rather than re-derived from `stub_bytes` by identity.
@@ -360,59 +423,66 @@ const CompressedBackend = struct {
     /// if a future backend's stub genuinely can't support it for some
     /// backend-specific reason.
     overlap_margin: ?u32,
+    /// This backend's own measured decompression time, in real PAL
+    /// seconds - the same cycle count `overlap_margin`'s own Musashi run
+    /// already produces (musashi_bench.OverlapMeasurement.cycles),
+    /// reused here so `--flash=auto`'s ">1 second" decision
+    /// (packWithBackend) costs nothing extra: no second emulation pass.
+    /// 0.0 whenever `overlap_margin` is null (nothing was measured).
+    seconds: f64,
 };
 
 fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool) !CompressedBackend {
-    const payload, const backend_id, const stub_bytes, const stub_listing, const supports_overlap = if (std.mem.eql(u8, backend_name, "store"))
-        .{ try store.compress(arena, image), container.BackendId.store, stub_store, listing_store, true }
+    const payload, const backend_id, const stub_bytes, const flash_stub_bytes, const stub_listing, const supports_overlap = if (std.mem.eql(u8, backend_name, "store"))
+        .{ try store.compress(arena, image), container.BackendId.store, stub_store, stub_store_flash, listing_store, true }
     else if (std.mem.eql(u8, backend_name, "inflate"))
-        .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
+        .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate, stub_inflate_flash, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "zultra"))
         // zultra is a different host-side compressor producing the same
         // raw-DEFLATE format as "inflate" - same backend_id, same stub,
         // see src/backends/zultra_vendor/README.md.
-        .{ try zultra.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
+        .{ try zultra.compress(arena, image), container.BackendId.inflate, stub_inflate, stub_inflate_flash, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "libdeflate"))
         // libdeflate is another host-side compressor producing the
         // same raw-DEFLATE format as "inflate"/"zultra" - same
         // backend_id, same stub, see
         // src/backends/libdeflate_vendor/README.md.
-        .{ try libdeflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
+        .{ try libdeflate.compress(arena, image), container.BackendId.inflate, stub_inflate, stub_inflate_flash, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "zopfli"))
         // zopfli is another host-side compressor producing the same
         // raw-DEFLATE format as "inflate"/"zultra"/"libdeflate" - same
         // backend_id, same stub, see
         // src/backends/zopfli_vendor/README.md.
-        .{ try zopfli.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
+        .{ try zopfli.compress(arena, image), container.BackendId.inflate, stub_inflate, stub_inflate_flash, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "zx0"))
-        .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0, true }
+        .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0, stub_zx0_flash, listing_zx0, true }
     else if (std.mem.eql(u8, backend_name, "salvador"))
         // salvador is a different host-side ZX0 compressor producing the
         // same format as "zx0" - same backend_id, same stub, see
         // src/backends/salvador_vendor/README.md.
-        .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0, true }
+        .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0, stub_zx0_flash, listing_zx0, true }
     else if (std.mem.eql(u8, backend_name, "zx0fast"))
         // zx0fast/salvadorfast reuse zx0's/salvador's exact host
         // encoders (identical payload format/bytes) but embed Chris
         // Hodges (Platon42)'s faster-decompressing depacker stub - own
         // backend_id, see src/container.zig's BackendId doc comment
         // and stubs/zx0/README.md.
-        .{ try zx0.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, listing_zx0fast, true }
+        .{ try zx0.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, stub_zx0fast_flash, listing_zx0fast, true }
     else if (std.mem.eql(u8, backend_name, "salvadorfast"))
-        .{ try salvador.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, listing_zx0fast, true }
+        .{ try salvador.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, stub_zx0fast_flash, listing_zx0fast, true }
     else if (std.mem.eql(u8, backend_name, "shrinkler"))
-        .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, listing_shrinkler, true }
+        .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, stub_shrinkler_flash, listing_shrinkler, true }
     else if (std.mem.eql(u8, backend_name, "lz4small"))
         // lz4small/lz4normal/lz4fast share one host-side LZ4HC
         // compressor (identical payload bytes) but each embeds a
         // genuinely different depacker stub - own backend_id per
         // variant, see src/container.zig's BackendId doc comment and
         // stubs/lz4/README.md.
-        .{ try lz4.compress(arena, image), container.BackendId.lz4_small, stub_lz4small, listing_lz4small, true }
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_small, stub_lz4small, stub_lz4small_flash, listing_lz4small, true }
     else if (std.mem.eql(u8, backend_name, "lz4normal"))
-        .{ try lz4.compress(arena, image), container.BackendId.lz4_normal, stub_lz4normal, listing_lz4normal, true }
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_normal, stub_lz4normal, stub_lz4normal_flash, listing_lz4normal, true }
     else if (std.mem.eql(u8, backend_name, "lz4fast"))
-        .{ try lz4.compress(arena, image), container.BackendId.lz4_fast, stub_lz4fast, listing_lz4fast, true }
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_fast, stub_lz4fast, stub_lz4fast_flash, listing_lz4fast, true }
     else {
         std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'libdeflate'/'zopfli'/'zx0'/'salvador'/'shrinkler'/'lz4small'/'lz4normal'/'lz4fast'/'zx0fast'/'salvadorfast'/'most'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
@@ -445,21 +515,24 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
     // for `execram bench`'s own per-backend timing), and keeps this
     // function free of --overlap-aware branching; that decision belongs
     // entirely to packWithBackend.
-    const overlap_margin: ?u32 = if (supports_overlap) blk: {
+    const overlap_margin: ?u32, const seconds: f64 = if (supports_overlap) blk: {
         const depack_offset = try musashi_bench.parseDepackOffset(stub_listing);
-        const margin = try musashi_bench.measureOverlapMargin(stub_bytes, depack_offset, payload, @intCast(payload.len), @intCast(expected.len));
+        const measurement = try musashi_bench.measureOverlapMargin(stub_bytes, depack_offset, payload, @intCast(payload.len), @intCast(expected.len));
+        const decompress_seconds = @as(f64, @floatFromInt(measurement.cycles)) / musashi_bench.PAL_CPU_HZ;
         if (verbose) {
-            std.log.info("  {s}: overlap safety_margin = {d} bytes", .{ backend_name, margin });
+            std.log.info("  {s}: overlap safety_margin = {d} bytes, decompress ~{d:.3}s", .{ backend_name, measurement.margin, decompress_seconds });
         }
-        break :blk margin;
-    } else null;
+        break :blk .{ measurement.margin, decompress_seconds };
+    } else .{ null, 0.0 };
 
     return .{
         .payload = payload,
         .backend_id = backend_id,
         .stub_bytes = stub_bytes,
+        .flash_stub_bytes = flash_stub_bytes,
         .stub_listing = stub_listing,
         .overlap_margin = overlap_margin,
+        .seconds = seconds,
     };
 }
 
@@ -483,16 +556,32 @@ fn hunk0Size(image: flatten.FlatImage) u32 {
     return container.residentTailSize(image.code_data.len, image.bss_size, image.reloc_stream.len);
 }
 
-fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash: bool, overlap_mode: OverlapMode) ![]u8 {
+fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash_mode: FlashMode, killtwitch: bool, overlap_mode: OverlapMode) ![]u8 {
     const compressed = try compressWithBackend(arena, image, backend_name, verbose);
     const resident_tail = hunk0Size(image);
+
+    // --flash decision: every backend has its own flash-instrumented
+    // stub now (no fallback case, unlike --overlap=on), so `.on` always
+    // takes it. `.auto` uses compressed.seconds - the exact cycle count
+    // the overlap-margin measurement above already produced, converted
+    // to real PAL seconds - so this costs nothing extra to decide.
+    const use_flash = switch (flash_mode) {
+        .off => false,
+        .on => true,
+        .auto => compressed.seconds > 1.0,
+    };
+    if (verbose) {
+        std.log.info("  {s}: flash {s} - decompress ~{d:.3}s", .{ backend_name, if (use_flash) "on" else "off", compressed.seconds });
+    }
+    const stub_bytes = if (use_flash) compressed.flash_stub_bytes else compressed.stub_bytes;
+
     // Overlap-mode hunk 1 (docs/format-spec.md §8b): stub_bytes ++
     // header only, no payload this time (buildContainer omits it
     // whenever it's given a margin) - still resident alongside hunk 0
     // for the duration of decompression, same as the disjoint layout's
     // own hunk 1, just far smaller since it no longer carries the whole
     // compressed payload.
-    const overlap_hunk1_size: u32 = @intCast(std.mem.alignForward(usize, compressed.stub_bytes.len + container.HEADER_SIZE, 4));
+    const overlap_hunk1_size: u32 = @intCast(std.mem.alignForward(usize, stub_bytes.len + container.HEADER_SIZE, 4));
 
     const use_overlap = switch (overlap_mode) {
         .off => false,
@@ -508,7 +597,7 @@ fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_n
             // Disjoint's real peak: hunk 0 (the resident image) and hunk 1
             // (stub+header+payload) are both resident simultaneously
             // during decompression (docs/memory-lifecycle.md).
-            const disjoint_hunk1_size: u32 = @intCast(std.mem.alignForward(usize, compressed.stub_bytes.len + container.HEADER_SIZE + compressed.payload.len, 4));
+            const disjoint_hunk1_size: u32 = @intCast(std.mem.alignForward(usize, stub_bytes.len + container.HEADER_SIZE + compressed.payload.len, 4));
             const disjoint_peak = resident_tail + disjoint_hunk1_size;
             const overlap_allocated = container.overlapAllocatedSize(stub_trampoline.len, @intCast(compressed.payload.len), margin, resident_tail);
             const overlap_peak = overlap_allocated + overlap_hunk1_size;
@@ -526,10 +615,10 @@ fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_n
         const allocated_size = container.overlapAllocatedSize(stub_trampoline.len, @intCast(compressed.payload.len), margin, resident_tail);
         const payload_offset = allocated_size - @as(u32, @intCast(std.mem.alignForward(usize, compressed.payload.len, 4)));
         const hunk0_body = try container.buildOverlapHunk0Body(arena, stub_trampoline, compressed.payload, payload_offset);
-        const hunk1_body = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, flash, margin, @intCast(stub_trampoline.len));
+        const hunk1_body = try container.buildContainer(arena, image, compressed.backend_id, stub_bytes, compressed.payload, use_flash, killtwitch, margin, @intCast(stub_trampoline.len));
         return container.writeHunkExecutable(arena, hunk0_body, hunk1_body, allocated_size, image.mem_chip);
     }
-    const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, flash, null, @intCast(stub_trampoline.len));
+    const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, stub_bytes, compressed.payload, use_flash, killtwitch, null, @intCast(stub_trampoline.len));
     return container.writeHunkExecutable(arena, stub_trampoline, container_bytes, resident_tail, image.mem_chip);
 }
 
@@ -592,6 +681,14 @@ fn cmdInfo(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         .{ .stub_name = "lz4small", .bytes = stub_lz4small },
         .{ .stub_name = "lz4normal", .bytes = stub_lz4normal },
         .{ .stub_name = "lz4fast", .bytes = stub_lz4fast },
+        .{ .stub_name = "store (flash)", .bytes = stub_store_flash },
+        .{ .stub_name = "inflate/zultra/libdeflate/zopfli (flash)", .bytes = stub_inflate_flash },
+        .{ .stub_name = "zx0/salvador (flash)", .bytes = stub_zx0_flash },
+        .{ .stub_name = "zx0fast/salvadorfast (flash)", .bytes = stub_zx0fast_flash },
+        .{ .stub_name = "shrinkler (flash)", .bytes = stub_shrinkler_flash },
+        .{ .stub_name = "lz4small (flash)", .bytes = stub_lz4small_flash },
+        .{ .stub_name = "lz4normal (flash)", .bytes = stub_lz4normal_flash },
+        .{ .stub_name = "lz4fast (flash)", .bytes = stub_lz4fast_flash },
     };
 
     var stdout_buffer: [4096]u8 = undefined;
@@ -680,12 +777,12 @@ fn cmdBench(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
             @intCast(expected.len),
         );
 
-        // flash=false: irrelevant to this command either way -
-        // musashi_bench.timeDepack above jumps straight into `Depack:`,
-        // bypassing `Start:` (where FLAG_FLASH's own code lives)
-        // entirely, so it could never affect anything this table
-        // measures.
-        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, false, null, @intCast(stub_trampoline.len));
+        // flash=false, killtwitch=false: irrelevant to this command
+        // either way - musashi_bench.timeDepack above already ran the
+        // plain (non-flash) stub directly against `Depack:`, so which
+        // stub buildContainer embeds here has no bearing on anything
+        // this table measures.
+        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, false, false, null, @intCast(stub_trampoline.len));
         const exe_bytes = try container.writeHunkExecutable(arena, stub_trampoline, container_bytes, hunk0Size(image), image.mem_chip);
         const ratio = @as(f64, @floatFromInt(exe_bytes.len)) / @as(f64, @floatFromInt(input_bytes.len)) * 100.0;
 
@@ -782,7 +879,7 @@ test "overlap margin stays bounded on incompressible input (store, zx0)" {
         try std.testing.expect(allocated_size >= resident_tail);
         try std.testing.expect(allocated_size >= @as(u32, margin) + compressed.payload.len);
 
-        const packed_bytes = try packWithBackend(arena, image, backend_name, false, false, .on);
+        const packed_bytes = try packWithBackend(arena, image, backend_name, false, .off, false, .on);
         try std.testing.expect(packed_bytes.len > 0);
     }
 }
@@ -805,8 +902,54 @@ test "every backend supports the overlap layout" {
         const compressed = try compressWithBackend(arena, image, backend_name, false);
         try std.testing.expect(compressed.overlap_margin != null);
 
-        const packed_bytes = try packWithBackend(arena, image, backend_name, false, false, .on);
+        const packed_bytes = try packWithBackend(arena, image, backend_name, false, .off, false, .on);
         try std.testing.expect(packed_bytes.len > 0);
+    }
+}
+
+test "flash-instrumented stubs decompress correctly under Musashi" {
+    // Runs each of the 8 distinct flash-instrumented stubs' own
+    // `Depack:` through Musashi in isolation (musashi_bench.timeDepack,
+    // the same mechanism `execram bench` uses), exactly like the plain
+    // stubs are already proven correct host-side (compressWithBackend's
+    // own self-check) - confirms the flicker poke inserted into each
+    // backend's hot decode loop (docs/format-spec.md §8c) doesn't
+    // corrupt decompression on a real (emulated) 68000, not just under
+    // Zig's own host-side reimplementation. One representative backend
+    // name per distinct flash stub binary (skipping zultra/libdeflate/
+    // zopfli/salvador/salvadorfast - alternate host compressors that
+    // embed the exact same flash stub as inflate/zx0 respectively,
+    // already covered here).
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const image = try incompressibleFlatImage(arena, 512);
+    const expected = try std.mem.concat(arena, u8, &.{ image.code_data, image.reloc_stream });
+
+    const cases = [_]struct { backend_name: []const u8, flash_listing: []const u8 }{
+        .{ .backend_name = "store", .flash_listing = listing_store_flash },
+        .{ .backend_name = "inflate", .flash_listing = listing_inflate_flash },
+        .{ .backend_name = "zx0", .flash_listing = listing_zx0_flash },
+        .{ .backend_name = "zx0fast", .flash_listing = listing_zx0fast_flash },
+        .{ .backend_name = "shrinkler", .flash_listing = listing_shrinkler_flash },
+        .{ .backend_name = "lz4small", .flash_listing = listing_lz4small_flash },
+        .{ .backend_name = "lz4normal", .flash_listing = listing_lz4normal_flash },
+        .{ .backend_name = "lz4fast", .flash_listing = listing_lz4fast_flash },
+    };
+
+    for (cases) |case| {
+        const compressed = try compressWithBackend(arena, image, case.backend_name, false);
+        const depack_offset = try musashi_bench.parseDepackOffset(case.flash_listing);
+        const result = try musashi_bench.timeDepack(
+            arena,
+            compressed.flash_stub_bytes,
+            depack_offset,
+            compressed.payload,
+            @intCast(compressed.payload.len),
+            @intCast(expected.len),
+        );
+        try std.testing.expectEqualSlices(u8, expected, result.output);
     }
 }
 

@@ -45,18 +45,6 @@
 EXEC_AllocMem	=	-198
 EXEC_FreeMem	=	-210
 
-; FLAG_FLASH support (docs/format-spec.md §5): a purely cosmetic,
-; optional "something is happening" indicator for slow backends on
-; real hardware - decompression of a large file under a backend like
-; shrinkler can take tens of seconds of real 68000 time (see
-; tools/bench's own measurements), with nothing else on screen to show
-; the machine hasn't hung. COLOR00 is the background/border colour
-; register - a real, fixed hardware address, not a relocatable program
-; one, same category as the other absolute addresses this file already
-; uses (EXEC_FreeMem via a6, ExecBase itself via 4.w).
-CUSTOM_COLOR00	=	$dff180
-FLASH_COLOR	=	$0f00		; bright red
-
 Start:
 	lea	StubEnd(pc),a2		; a2 = header base, preserved throughout
 
@@ -110,15 +98,14 @@ Start:
 .havepayload:
 	move.l	a4,a1			; a1 = output = final, directly
 
-	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH
-	beq.s	.noflashon
-	move.w	#FLASH_COLOR,CUSTOM_COLOR00
-.noflashon:
+	; FLAG_FLASH no longer branches on anything here - it's purely
+	; informational now (docs/format-spec.md's in-loop flicker redesign):
+	; a flash-instrumented packed file simply embeds a different Depack:
+	; altogether (each backend's own stub_*_flash.s), with the flicker
+	; baked directly into its hot decode loop. See that file's own
+	; comment for where/how, and header.i's own FLAG_FLASH/FLAG_KILLTWITCH
+	; comments for the full rationale.
 	bsr.w	Depack
-	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH - re-tested, not cached:
-	beq.s	.noflashoff		; Depack is free to clobber condition
-	move.w	#0,CUSTOM_COLOR00	; codes along with D0/D1/A0/A1.
-.noflashoff:
 
 	btst	#1,HDR_FLAGS(a2)	; FLAG_HAS_RELOCS
 	beq.s	.norelocs

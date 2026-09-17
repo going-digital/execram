@@ -85,6 +85,60 @@ const stubs = [_]Stub{
         .include_dir = "stubs/common",
         .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_fastest.asm" },
     },
+    // Flash-instrumented variants (docs/format-spec.md's in-loop
+    // decompression flicker) - a separately-assembled stub per backend
+    // with the COLOR19/COLOR00 poke baked directly into its hot decode
+    // loop, chosen over a shared-stub runtime branch since this cost
+    // sits inside a loop that runs tens of thousands to millions of
+    // times (see stubs/*/stub_*_flash.s's own header comments).
+    .{
+        .name = "stub_store_flash",
+        .source = "stubs/store/stub_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/store/depack_core_flash.s" },
+    },
+    .{
+        .name = "stub_inflate_flash",
+        .source = "stubs/inflate/stub_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/inflate/inflate_core_flash.s" },
+    },
+    .{
+        .name = "stub_zx0_flash",
+        .source = "stubs/zx0/stub_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000_flash.s" },
+    },
+    .{
+        .name = "stub_zx0fast_flash",
+        .source = "stubs/zx0/stub_fast_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000_fast_flash.s" },
+    },
+    .{
+        .name = "stub_shrinkler_flash",
+        .source = "stubs/shrinkler/stub_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/shrinkler/ShrinklerDecompress_flash.s" },
+    },
+    .{
+        .name = "stub_lz4small_flash",
+        .source = "stubs/lz4/stub_small_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_smallest_flash.asm" },
+    },
+    .{
+        .name = "stub_lz4normal_flash",
+        .source = "stubs/lz4/stub_normal_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_normal_flash.asm" },
+    },
+    .{
+        .name = "stub_lz4fast_flash",
+        .source = "stubs/lz4/stub_fast_flash.s",
+        .include_dir = "stubs/common",
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_fastest_flash.asm" },
+    },
 };
 
 /// A real hunk executable built at test time (vasm assembles to a linkable

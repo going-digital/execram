@@ -81,6 +81,18 @@ BACKENDS=(store inflate zultra zx0 salvador shrinkler)
 # prefer for this specific corpus.
 OVERLAP_BACKENDS=(store shrinkler lz4small)
 DISJOINT_BACKENDS=(inflate shrinkler)
+# --flash=on (docs/format-spec.md's in-loop decompression flicker) -
+# forces the flash-instrumented stub on real hardware for a
+# representative sample: store (simplest insertion point), shrinkler
+# (most complex register story - see ShrinklerDecompress_flash.s's own
+# header comment and stub.s's past register-reuse bug), and lz4fast
+# (riskiest edit - a vasm-macro-free, mechanically-duplicated poke
+# across 33 identical dispatch-trampoline sites in
+# lz4_fastest_flash.asm). Plain --backend loops above already implicitly
+# exercise --flash=auto's "off" path (these corpus programs boot well
+# under 1s of emulated decompression), so this is the only place
+# --flash=on itself gets real-hardware coverage.
+FLASH_BACKENDS=(store shrinkler lz4fast)
 
 if [ -z "${EXECRAM_KICKSTART:-}" ]; then
   echo "error: set EXECRAM_KICKSTART to a Kickstart ROM path (see run_boot_test.sh's header)" >&2
@@ -249,6 +261,9 @@ for meta_path in "${META_FILES[@]}"; do
   for backend in "${DISJOINT_BACKENDS[@]}"; do
     run_one_boot_test "$name" "$exe_path" "${backend}-disjoint" "--backend=$backend" "--overlap=off"
   done
+  for backend in "${FLASH_BACKENDS[@]}"; do
+    run_one_boot_test "$name" "$exe_path" "${backend}-flash" "--backend=$backend" "--flash=on"
+  done
 done
 
 echo ""
@@ -260,6 +275,9 @@ for backend in "${OVERLAP_BACKENDS[@]}"; do
 done
 for backend in "${DISJOINT_BACKENDS[@]}"; do
   ALL_LABELS+=("${backend}-disjoint")
+done
+for backend in "${FLASH_BACKENDS[@]}"; do
+  ALL_LABELS+=("${backend}-flash")
 done
 
 overall_pass=1

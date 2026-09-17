@@ -44,7 +44,8 @@ Prebuilt binaries for Linux (x86_64/aarch64/arm), macOS
 
 ```sh
 execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|zx0fast|salvadorfast|most|auto]
-             [--mem=chip|fast] [-v] [--flash] <in> <out>
+             [--mem=chip|fast] [--overlap=on|off|auto] [-v]
+             [--flash=on|off|auto] [--killtwitch] <in> <out>
 ```
 
 Packs `<in>` into `<out>`. `--backend=most`, the default, tries
@@ -63,7 +64,23 @@ program, not something execram decides for you (see `execram bench`).
 `zx0`'s/`salvador`'s exact host encoders paired with a faster depacker
 (Chris Hodges/Platon42's fork), ~29% fewer decompression cycles for a
 64-byte larger stub. Chip vs. Fast RAM is normally auto-detected from
-the input; `--mem` overrides it.
+the input; `--mem` overrides it. `--overlap=auto` (the default) moves
+the still-compressed payload into the resident hunk's own tail instead
+of the scratch hunk whenever that reduces peak memory for this file
+(every backend supports it); `--overlap=off` always uses the plain
+two-hunk layout.
+
+`--flash=auto` (the default) makes a slow decompression (Shrinkler on
+a large file can take tens of seconds of real 68000 time) write
+changing data to `COLOR19` (the mouse pointer sprite's own middle
+colour) on every iteration of the decode loop, so the screen keeps
+visibly flickering for as long as the machine is still working instead
+of sitting blank with no sign it hasn't hung - enabled automatically
+whenever this file's own decompression is measured to take more than
+1 second; `--flash=on`/`--flash=off` force it on or off regardless.
+`--killtwitch` redirects the flicker to `COLOR00` (the border/
+background) instead, for programs that already use the pointer sprite
+for something else during decompression.
 
 ```sh
 execram info <packed-exe>

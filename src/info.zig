@@ -32,6 +32,7 @@ const FLAG_MEM_CHIP: u8 = 1;
 const FLAG_HAS_RELOCS: u8 = 2;
 const FLAG_FLASH: u8 = 4;
 const FLAG_OVERLAP: u8 = 8;
+const FLAG_KILLTWITCH: u8 = 16;
 const MAGIC: u32 = 0x45784372; // "ExCr"
 const HEADER_SIZE: usize = 32;
 
@@ -71,6 +72,9 @@ pub const Header = struct {
     }
     pub fn hasFlash(self: Header) bool {
         return self.flags & FLAG_FLASH != 0;
+    }
+    pub fn hasKilltwitch(self: Header) bool {
+        return self.flags & FLAG_KILLTWITCH != 0;
     }
     pub fn isOverlap(self: Header) bool {
         return self.flags & FLAG_OVERLAP != 0;
@@ -157,6 +161,7 @@ pub fn printInfo(
     const mem_chip = header.memChip();
     const has_relocs = header.hasRelocs();
     const has_flash = header.hasFlash();
+    const has_killtwitch = header.hasKilltwitch();
     const is_overlap = header.isOverlap();
     const uncompressed_size = header.uncompressedSize();
     const resident_size = header.residentSize();
@@ -170,7 +175,11 @@ pub fn printInfo(
     });
     try w.print("  memory:              {s}\n", .{if (mem_chip) "chip" else "any/fast"});
     try w.print("  relocations:         {s}\n", .{if (has_relocs) "yes" else "none"});
-    try w.print("  border flash:        {s}\n", .{if (has_flash) "yes" else "no"});
+    if (has_flash) {
+        try w.print("  decompress flicker:  yes (COLOR{s})\n", .{if (has_killtwitch) "00" else "19"});
+    } else {
+        try w.print("  decompress flicker:  no\n", .{});
+    }
     try w.print("  header size:         {d} bytes\n", .{header.header_size});
     try w.print("  code+data size:      {d} bytes\n", .{header.code_data_size});
     try w.print("  bss size:            {d} bytes\n", .{header.bss_size});
@@ -216,7 +225,7 @@ test "printInfo reports a real container's fields" {
 
     const stub = "FAKESTUB"; // 8 bytes, arbitrary - not a real assembled stub
     const payload = "COMPRESSEDPAYLOAD!!"; // 19 bytes, arbitrary
-    const container_bytes = try container.buildContainer(allocator, image, .zx0, stub, payload, false, null, "FAKETRAMPOLINE!!".len);
+    const container_bytes = try container.buildContainer(allocator, image, .zx0, stub, payload, false, false, null, "FAKETRAMPOLINE!!".len);
     defer allocator.free(container_bytes);
     const resident_size = @as(u32, @intCast(image.code_data.len)) + image.bss_size;
     const exe_bytes = try container.writeHunkExecutable(allocator, "FAKETRAMPOLINE!!", container_bytes, resident_size, image.mem_chip);
@@ -234,7 +243,7 @@ test "printInfo reports a real container's fields" {
     try std.testing.expect(std.mem.indexOf(u8, report, "layout:              disjoint (2 hunks)") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "memory:              chip") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "relocations:         yes") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "border flash:        no") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "decompress flicker:  no") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "code+data size:      8 bytes") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "bss size:            100 bytes") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "reloc stream size:   2 bytes") != null);
@@ -260,7 +269,7 @@ test "printInfo reports an overlap-layout container's two hunks" {
     // Overlap layout: buildContainer omits the payload from hunk 1's own
     // body whenever it's given a margin (docs/format-spec.md §8b) - the
     // payload instead lives at a computed tail offset within hunk 0.
-    const hunk1_body = try container.buildContainer(allocator, image, .store, stub, payload, false, margin, trampoline.len);
+    const hunk1_body = try container.buildContainer(allocator, image, .store, stub, payload, false, false, margin, trampoline.len);
     defer allocator.free(hunk1_body);
     const resident_tail = container.residentTailSize(image.code_data.len, image.bss_size, image.reloc_stream.len);
     const allocated_size = container.overlapAllocatedSize(trampoline.len, @intCast(payload.len), margin, resident_tail);

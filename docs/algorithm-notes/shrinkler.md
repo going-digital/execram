@@ -63,3 +63,21 @@ those actually do (per-hunk allocation via `LoadSeg` itself, no
 `AllocMem`, and - in its default mode - the one `FreeMem` call anywhere
 in the whole codebase, freeing its own scratch hunk once decompression
 finishes).
+
+## In-loop decompression flicker
+
+A3 is the flicker's address register here too
+(`stubs/shrinkler/ShrinklerDecompress_flash.s`, `docs/format-spec.md`
+§8c) - confirmed free by the same kind of direct check that caught the
+real A2 bug above: A3 appears only inside `ReportProgress`'s own
+callback-arg code, which is dead in execram's usage (the callback
+pointer/A2 is always zero, so `.nocallback` is always the path taken -
+see `stub.s`'s own note on this routine's register quirks). The
+flash-instrumented `stub_flash.s` sets up A3 - and reads
+`FLAG_KILLTWITCH` via A2 - *before* the plain `stub.s`'s own
+`suba.l a2,a2` zeroes A2 for the (unused) progress callback, the same
+ordering constraint that makes A2's real value worth saving/restoring
+around this call at all. Two poke sites, not one: `move.w d6,(a3)` right
+after `.lit`'s `move.b d6,(a5)+` (a freshly-decoded literal byte) and
+`move.w d0,(a3)` in `.copyloop` (the remaining-length counter) - full
+per-byte coverage across both the literal and match-copy paths.

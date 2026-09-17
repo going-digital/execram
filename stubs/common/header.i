@@ -30,12 +30,27 @@ VERSION_MAJOR_V0	=	0
 
 FLAG_MEM_CHIP		=	1
 FLAG_HAS_RELOCS		=	2
+; Purely informational as of docs/format-spec.md's in-loop flicker
+; redesign: this file's own embedded stub either has the flicker baked
+; into its hot decode loop or it doesn't - there is no runtime branch
+; here anymore (Depack: itself differs between the plain and flash-
+; instrumented stub binaries, chosen once at pack time - see
+; src/main.zig's packWithBackend). This bit exists so `execram info` can
+; report whether a given packed file uses it, nothing else reads it.
 FLAG_FLASH		=	4
 ; True overlap-in-place decompression (docs/format-spec.md §8, §10):
 ; the compressed payload lives at hunk 0's own tail instead of in hunk
 ; 1, and HDR_SAFETY_MARGIN is a real, meaningful value instead of the
 ; always-0 it is when this flag is clear.
 FLAG_OVERLAP		=	8
+; Only meaningful when FLAG_FLASH is set: redirects the in-loop flicker
+; target from COLOR19 ($dff1a6, the mouse pointer sprite's own middle
+; color - the default, invisible-pointer-safe choice) to COLOR00
+; ($dff180, the border/background color) instead. Read once per
+; instrumented backend's own stub_*_flash.s wrapper, before the header
+; pointer register gets repurposed for that backend's own decompression
+; work - see that wrapper's own comment for exactly where.
+FLAG_KILLTWITCH		=	16
 
 RELOC_STREAM_END	=	$FE
 RELOC_STREAM_ESCAPE	=	$FF

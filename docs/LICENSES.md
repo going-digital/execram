@@ -82,6 +82,13 @@ output executable.
 scope for us — we're writing our own hunk parser from the public hunk
 format documentation, not copying Commodore's header.
 
+`stubs/shrinkler/ShrinklerDecompress_flash.s` (docs/format-spec.md §8c)
+is a second, separately-marked altered copy adding the in-loop
+decompression flicker poke - no notice obligation either way given this
+file's public-domain-equivalent license above, but kept as its own file
+(not an in-place edit) for consistency with `unzx0_68000_flash.s` (§3),
+where the zlib license actually does require it.
+
 ## 2. ZX0 — `einar-saukas/ZX0`
 
 Commit audited: `ecde3a2ae05061fe06469ed46df81a33b7de7d86`
@@ -128,6 +135,13 @@ the notice in the stub source and don't claim we wrote the original.
 Vendored in M3 at `stubs/zx0/unzx0_68000.s`, with the entry label
 renamed to `Depack` (the one deliberate change - see that file's header
 comment) to match `stubs/common/runtime.i`'s calling convention.
+
+`stubs/zx0/unzx0_68000_flash.s` (docs/format-spec.md §8c) is a second,
+separately-marked altered copy - not this file edited in place, per
+this same license's own "altered source versions must be plainly marked
+as such" (condition 2 above) - adding the in-loop decompression flicker
+poke; see that file's own header comment for the exact diff and the
+unmodified license text it carries forward.
 
 ## 4. Keir Fraser's `inflate.S` and `bootblock.S` — `keirf/Amiga-Stuff`
 
@@ -544,3 +558,9 @@ real programs, but a genuine, documented constraint the original
 `unzx0_68000.s` doesn't have. See `PROJECT_PLAN.md`'s zx0fast entry
 for the measured size/speed numbers and this constraint's practical
 risk.
+
+`stubs/zx0/unzx0_68000_fast_flash.s` (docs/format-spec.md §8c) is,
+likewise, a second, separately-marked altered copy adding the in-loop
+decompression flicker poke - see §3's own note on
+`unzx0_68000_flash.s` above for why a new file rather than an in-place
+edit, and that file's own header comment for the exact diff.

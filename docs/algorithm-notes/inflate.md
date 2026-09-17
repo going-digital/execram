@@ -65,3 +65,24 @@ the one real dialect workaround in this whole project: it's written
 for vasm's GNU-as-style syntax module, not the Motorola/Devpac syntax
 every other stub uses - see `stubs/inflate/README.md` for exactly what
 that meant for the build.
+
+## In-loop decompression flicker
+
+The trickiest register story of any backend (`docs/format-spec.md`
+§8c): `inflate_core.s`'s own `build_code` subroutine (called twice, once
+each for the literal/length and distance Huffman tables) clobbers A3,
+the register every other backend's flash stub sets up once at the very
+top of `Depack:` - so `stubs/inflate/inflate_core_flash.s` instead sets
+up A3 *after both* `build_code` calls finish, right before
+`decode_loop:` starts. That leaves a gap between where `FLAG_KILLTWITCH`
+needs to be read (via A2, before `stubs/inflate/stub_flash.s`'s own
+`Depack:` overwrites A2 with `AllocMem`'s scratch pointer a few
+instructions in) and where it's actually needed (after `build_code`):
+the wrapper caches it into D7 immediately after the routine's own
+`movem.l d2-d7/a2-a6,-(sp)` - not before, which would save *this* code's
+own D7 instead of the real caller's, violating `Depack`'s "preserves
+D2-D7/A2-A6" contract - and D7 survives unclobbered across both
+`build_code` calls since that routine already saves/restores all of
+D0-D7 around its own body. The poke itself (`move.w d0,(a3)`) lands
+right after `decode_loop`'s own `move.b d0,(a4)+`, flickering on every
+decoded literal byte.

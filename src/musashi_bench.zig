@@ -314,13 +314,26 @@ pub fn timeDepack(
 /// worst-case inputs (incompressible data, and data that front-loads
 /// long back-references, are the usual suspects) to trust the result
 /// as a proven formula rather than a one-off measurement.
+pub const OverlapMeasurement = struct {
+    margin: u32,
+    /// This run's own exact cycle count (same `RunResult.cycles`
+    /// `timeDepack` itself returns, from the identical
+    /// setupRun/startRun/runToCompletion machinery) - exposed so a
+    /// caller that already needs to run this measurement (every backend,
+    /// for the overlap margin) can also get an exact decompression-time
+    /// estimate for free, rather than running a second, separate
+    /// `timeDepack` pass whose cost would be redundant with this one
+    /// (see src/main.zig's own `--flash=auto` use of this).
+    cycles: u64,
+};
+
 pub fn measureOverlapMargin(
     stub_bytes: []const u8,
     depack_offset: u32,
     payload: []const u8,
     compressed_size: u32,
     uncompressed_size: u32,
-) !u32 {
+) !OverlapMeasurement {
     const setup = try setupRun(stub_bytes, payload, uncompressed_size);
 
     overlap_tracking = true;
@@ -333,7 +346,7 @@ pub fn measureOverlapMargin(
     overlap_required_margin = 0;
 
     startRun(setup, depack_offset, compressed_size);
-    _ = try runToCompletion(setup.trampoline);
+    const run = try runToCompletion(setup.trampoline);
 
-    return @intCast(overlap_required_margin);
+    return .{ .margin = @intCast(overlap_required_margin), .cycles = run.cycles };
 }

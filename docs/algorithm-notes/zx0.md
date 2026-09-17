@@ -103,3 +103,20 @@ branches - whenever `src/main.zig`'s `compressWithBackend` starts
 measuring a margin for it too; no stub or runtime change is needed to
 extend `--overlap` there, only that one wiring decision (PROJECT_PLAN.md
 scope for this pass; see `docs/format-spec.md` §10).
+
+## In-loop decompression flicker
+
+Both depackers' flash-instrumented siblings
+(`stubs/zx0/unzx0_68000_flash.s`, `stubs/zx0/unzx0_68000_fast_flash.s`,
+`docs/format-spec.md` §8c) use A3 for the poke address, confirmed via
+direct grep to appear nowhere in either original file. `unzx0_68000.s`'s
+own entry point already matches the `Depack` contract directly, so its
+flash stub (`stubs/zx0/stub_flash.s`) sets up A3 at the very top, before
+calling in - `FLAG_KILLTWITCH` is read via A2 while it's still the real
+header pointer. `unzx0_68000_fast.s`'s entry label
+(`zx0_decompress:`, not `Depack:` - it needs a thin wrapper regardless,
+since it trashes D0-D2/A2) means A2 isn't reliably valid at *its* own
+entry, so `stubs/zx0/stub_fast_flash.s` does the A3 setup itself, in the
+wrapper, before the `bsr.s zx0_decompress` call. Both poke
+`move.w d0,(a3)` (the `dbf`/`dbra` loop counter) in `.copy_lits` and
+`.copy_match`/`.do_copy_offs` - every decoded byte, in both variants.

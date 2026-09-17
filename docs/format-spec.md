@@ -176,9 +176,10 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 |----:|------|-------------------|
 | 0   | `MEM_CHIP` | Allocate hunk 0 (the resident image, §2) in Chip RAM (`MEMF_CHIP`). Clear means `MEMF_ANY` — a binary choice, decided by `execram pack` from the original executable's own hunk memory attributes (any hunk requesting Chip RAM sets it for the whole merged image) and overridable via `--mem=chip\|fast` (`src/main.zig`, `container.zig`'s `mem_chip` field). Only hunk 0 is affected either way — hunk 1 (the scratch stub+header+payload hunk) is always plain `MEMF_ANY`, regardless of this bit, since it's freed long before decompression is done and never needs Chip-RAM addressability itself. |
 | 1   | `HAS_RELOCS` | A reloc stream follows the code+data in the decompressed payload (§6). If clear, `reloc_stream_size` must be 0 and the fixup pass is skipped entirely. |
-| 2   | `FLASH` | Purely cosmetic, no effect on decoding: the stub sets `COLOR00` (the background/border colour register, `$dff180`) to a fixed bright colour immediately before calling the backend's `Depack:`, and restores it to black immediately after — a visible "something is happening" indicator for slow backends on real hardware, where a large file can otherwise sit at a blank screen for tens of seconds with no sign the machine hasn't hung. Set by `execram pack --flash`. |
+| 2   | `FLASH` | Purely informational — carries no runtime meaning of its own and nothing branches on it. When set, the packed file's embedded `Depack:` is the backend's own flash-instrumented stub (`stubs/*/stub_*_flash.s`, §8c below), which writes changing data to `COLOR19` (or `COLOR00` if `FLAG_KILLTWITCH` is also set) on every iteration of its hot decode loop — a visible, continuously-updating "still alive" indicator for slow backends on real hardware, where a large file can otherwise sit at a blank screen for tens of seconds with no sign the machine hasn't hung. This bit only affects `execram info`'s own reporting; which stub a packed file actually contains is decided once, at pack time, by which binary `execram pack` chose to embed. Set by `execram pack --flash=on\|auto` when the chosen backend has a flash-instrumented stub (every backend does — §8c). |
 | 3   | `OVERLAP` | True overlap-in-place decompression (§8b): still §2's ordinary two-hunk load file, but the compressed payload lives at a computed tail offset within hunk 0 itself (the resident image) instead of right after the header in hunk 1 (which is still present, still freed after use, just much smaller without the payload), and `safety_margin` above is a real, meaningful value instead of the always-0 it is when this bit is clear. Set by `execram pack --overlap=on\|auto` when the chosen backend supports the overlap layout (every backend does — §8b). |
-| 4-7 | *(reserved)* | Must be 0 in v0. A stub must ignore reserved bits it doesn't understand rather than reject the file — only a `version_major` bump means "you must understand this to run me correctly." |
+| 4   | `KILLTWITCH` | Only meaningful when `FLAG_FLASH` (bit 2) is also set — meaningless (and never set) otherwise. When set, the flash-instrumented stub's poke target is `COLOR00` ($dff180, the border/background register) instead of `COLOR19` ($dff1a6, the mouse pointer sprite's own middle colour — the default), for programs that already use the pointer sprite for something else during decompression. Like `FLASH` itself, purely informational — the actual target address was baked into the embedded stub at pack time (read once from this same bit, before it's overwritten — see each backend's own `stub_*_flash.s`). Set by `execram pack --flash=on\|auto --killtwitch`. |
+| 5-7 | *(reserved)* | Must be 0 in v0. A stub must ignore reserved bits it doesn't understand rather than reject the file — only a `version_major` bump means "you must understand this to run me correctly." |
 
 **Known limitation, inherited from flattening multiple hunks into one:**
 if the original program had some hunks that needed Chip RAM and others
@@ -381,6 +382,107 @@ whichever is smaller; small payloads, or backends like `store` that
 never actually shrink the input, often keep using the disjoint layout,
 since the overlap layout's own on-disk-fit and alignment overhead can
 outweigh its savings there.
+
+## 8c. In-loop decompression flicker (`FLAG_FLASH`/`FLAG_KILLTWITCH`)
+
+An earlier design poked `COLOR00` to a fixed bright colour once, right
+before `Depack:` was called, and restored it once right after - a static
+"something is happening" indicator with no way to show the machine is
+*still* alive partway through a long decompression (Shrinkler on a large
+file can take tens of seconds of real 68000 time - see `execram bench`).
+The current design instead writes changing data to a hardware colour
+register on every iteration of the chosen backend's own hot decode loop,
+so the flicker itself tracks real progress instead of just marking the
+start and end.
+
+**Dual stub, not a runtime branch.** Unlike `FLAG_OVERLAP` (§8b), which
+branches once per `Depack` call inside the shared `stubs/common/
+runtime.i`, the flicker poke sits inside a loop that can run from tens of
+thousands to millions of times per decompression - a shared-stub runtime
+branch would cost every packed file a few cycles per *iteration* even
+with flashing disabled, not once per decompression the way `--overlap`'s
+branch does. Instead, each backend ships **two independently-assembled
+stubs**: its ordinary one (`stubs/<backend>/stub.s` et al.) and a
+flash-instrumented sibling (`stubs/<backend>/stub_*_flash.s`, and for
+inflate/zx0-family/shrinkler/lz4-family, a matching flash-instrumented
+copy of their own core decode file) with the poke permanently baked into
+the loop body - zero cost when off, since the plain stub simply doesn't
+contain the instruction at all. `execram pack` embeds whichever binary
+matches its `--flash` decision (below); `FLAG_FLASH`/`FLAG_KILLTWITCH`
+themselves carry no runtime meaning at all (§5) - they exist purely so
+`execram info` can report what a given packed file contains.
+
+**Target register.** Every flash stub writes `move.w` (word - Amiga
+custom chip registers are unreliable on byte-sized writes) to one of two
+hardware colour registers, chosen once, at the very start of the
+flash-instrumented `Depack:`, by reading `FLAG_KILLTWITCH` from the
+header (still valid via A2 at that point, before any backend repurposes
+it) into whichever register the backend's own register-liveness analysis
+found free:
+
+- **Default (`FLAG_KILLTWITCH` clear): `COLOR19`** ($dff1a6) - the mouse
+  pointer sprite's own middle colour, a well-known cruncher trick: it
+  flickers visibly even with no real pointer sprite active, without
+  disturbing the screen's own background/border.
+- **`--killtwitch` (`FLAG_KILLTWITCH` set): `COLOR00`** ($dff180) - the
+  background/border register instead, for programs that already use the
+  pointer sprite for something else during decompression.
+
+The value written doesn't matter - each backend simply reuses whatever
+register already holds live, changing decode state at the poke point
+(a decoded literal byte, a loop counter, ...), so the poke costs one
+instruction and no extra register pressure.
+
+**Per-backend granularity.** Every backend pokes on (at least) its own
+per-byte copy loop, with two accepted exceptions where a byte-granular
+poke isn't possible without either corrupting the algorithm or requiring
+disproportionate duplication:
+
+- **lz4fast** has no shared copy loop at all - it's fully unrolled via a
+  256-entry jump table into hand-duplicated `move.b` chains, several of
+  which the jump table itself enters at fixed mid-block byte offsets
+  (`sl_sm0+4`, `sl_sm0+2`, ...) that a poke inside the copy chain would
+  silently shift and break. Its poke instead lives in the 5-instruction
+  per-token dispatch trampoline that recurs identically after every
+  block (33 sites, mechanically duplicated) - so lz4fast flickers once
+  per LZ4 *token*, not once per byte.
+- **lz4normal**'s counted `.litcopy`/`.copy` loops (used for runs of 15+
+  literal/match bytes within one token) are instrumented, but its
+  hand-unrolled short-run paths (under 15 bytes - the common case) are
+  not, for the same "don't touch a fixed-offset-addressed unrolled
+  block" reason as lz4fast; every token long enough to overflow into the
+  counted loop still flickers.
+
+Every other backend (store, inflate, zx0, zx0fast, shrinkler, lz4small)
+pokes on every single decoded byte.
+
+**Register liveness was verified directly against each backend's own
+source**, not assumed from a shared table - register liveness at a given
+point in a specific vendored/adapted decoder is exactly the kind of
+per-file detail earlier work (§8b's own self-modifying-code and
+odd-address bugs) proved unsafe to guess at. Two examples where an
+initial assumption was wrong and had to be corrected before shipping:
+`store`'s header-pointer register (A2) turns out to still be needed
+*after* `Depack` returns (`runtime.i`'s own `RelocFixup`/BSS-clear step
+re-reads it), so the flicker's address register had to be a genuinely
+unused one instead; and inflate's `build_code` subroutine clobbers the
+register initially assumed free "for the whole call," forcing that
+backend's own address-register setup to move to after both `build_code`
+calls finish, with the `FLAG_KILLTWITCH` decision itself cached into a
+spare data register across that gap instead.
+
+**`--flash` CLI (`src/main.zig`, `cmdPack`):**
+
+- `--flash=off`: never embeds a flash-instrumented stub.
+- `--flash=on`: always embeds one. Every backend has one, so (unlike
+  `--overlap=on`) there is no unsupported-backend fallback case.
+- `--flash=auto` (the default): embeds one only when this specific
+  file's own measured decompression time exceeds 1 second - the same
+  cycle count `measureOverlapMargin` (§8b) already produces for every
+  backend, converted to real PAL seconds, so this decision costs nothing
+  beyond what `--overlap`'s own measurement already pays for.
+- `--killtwitch`: redirects the poke target to `COLOR00` (see above); has
+  no effect when flashing itself is off.
 
 ## 9. Versioning policy
 
