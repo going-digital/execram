@@ -613,8 +613,10 @@ pub fn build(b: *std.Build) void {
         test_module.addAnonymousImport(stub.name, .{ .root_source_file = bin });
 
         // A second, separate assemble invocation with `-L` (text listing,
-        // including a "Symbols:" section with each label's hex offset -
-        // e.g. "Depack LAB (0xd6)") for tools/bench, which needs to know
+        // including a symbol table with each label's hex offset - see
+        // src/musashi_bench.zig's own parseDepackOffset for the two
+        // real formats vasm has used for this section across versions)
+        // for tools/bench, which needs to know
         // where a stub's `Depack:` entry point lands inside the raw
         // binary above so it can jump the emulated CPU straight there.
         // Not folded into the `-Fbin` invocation above: vasm doesn't

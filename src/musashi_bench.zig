@@ -115,22 +115,48 @@ export fn m68k_write_memory_32(address: c_uint, value: c_uint) callconv(.c) void
     m68k_write_memory_16(address + 2, value & 0xffff);
 }
 
-/// Parses a vasm `-L` listing's "Symbols:" section for the top-level
-/// (not local/dot-suffixed) `Depack` label's offset - e.g. a real
-/// listing's own line reads `Depack LAB (0xd6) sec=CODE`, while a
-/// stub-internal local label with the same base name reads
-/// ` Depack .rbloop LAB (0xec) sec=CODE` (indented, and dotted) and must
-/// not match. Confirmed against a real listing before writing this,
-/// not guessed from the format's documentation - see build.zig's own
-/// comment on why a listing is needed at all (`-Fbin` output carries no
-/// symbol metadata).
+/// Parses a vasm `-L` listing's own symbol table for the top-level (not
+/// local/dot-suffixed) `Depack` label's offset. Handles two real,
+/// confirmed-different formats seen across vasm's own history - not
+/// guessed from documentation, both captured directly from real
+/// listings before writing this:
+///
+///   - vasm 1.8e and earlier: `Depack LAB (0xd6) sec=CODE`, while a
+///     stub-internal local label with the same base name reads
+///     ` Depack .rbloop LAB (0xec) sec=CODE` (indented, and dotted) and
+///     must not match.
+///   - vasm 2.0f and later (confirmed against a freshly-built vasm from
+///     the exact same URL `.github/workflows/*.yml` fetches - CI builds
+///     vasm from scratch on every run, so its version silently drifts
+///     out from under this project over time, unlike everything else
+///     here, which is either vendored or pinned): a "Symbols by name:"
+///     section, one line per *global* symbol only (local/dotted labels
+///     don't appear in it at all, so no separate exclusion is needed
+///     the way the older format needs one) - `Depack` followed by
+///     padding whitespace, then `A:` (address-type symbol, vs. `E:` for
+///     an equate/constant like the HDR_* fields), then 8 hex digits.
+///
+/// A real, reproduced-on-a-genuinely-clean-build incident, not a
+/// theoretical concern: this function's own old-format-only
+/// implementation broke every real host-side test that reaches it the
+/// moment CI's freshly-built vasm happened to be 2.0f instead of
+/// whatever it was when the old format was last verified - see the
+/// commit that added this comment for the full incident.
 pub fn parseDepackOffset(listing: []const u8) !u32 {
     var lines = std.mem.splitScalar(u8, listing, '\n');
     while (lines.next()) |line| {
-        if (!std.mem.startsWith(u8, line, "Depack LAB (0x")) continue;
-        const rest = line["Depack LAB (0x".len..];
-        const close = std.mem.indexOfScalar(u8, rest, ')') orelse continue;
-        return std.fmt.parseInt(u32, rest[0..close], 16);
+        if (std.mem.startsWith(u8, line, "Depack LAB (0x")) {
+            const rest = line["Depack LAB (0x".len..];
+            const close = std.mem.indexOfScalar(u8, rest, ')') orelse continue;
+            return std.fmt.parseInt(u32, rest[0..close], 16);
+        }
+        if (std.mem.startsWith(u8, line, "Depack") and
+            (line.len == "Depack".len or line["Depack".len] == ' ' or line["Depack".len] == '\t'))
+        {
+            const marker = std.mem.indexOf(u8, line, "A:") orelse continue;
+            const hex = std.mem.trimEnd(u8, line[marker + 2 ..], " \t\r");
+            return std.fmt.parseInt(u32, hex, 16);
+        }
     }
     return error.DepackLabelNotFound;
 }
