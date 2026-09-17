@@ -632,8 +632,12 @@ fn buildPackedExecutable(arena: std.mem.Allocator, image: flatten.FlatImage, bac
     if (use_overlap) {
         const margin = compressed.overlap_margin.?;
         const allocated_size = container.overlapAllocatedSize(stub_trampoline.len, @intCast(compressed.payload.len), margin, resident_tail);
-        const payload_offset = allocated_size - @as(u32, @intCast(std.mem.alignForward(usize, compressed.payload.len, 4)));
-        const hunk0_body = try container.buildOverlapHunk0Body(arena, stub_trampoline, compressed.payload, payload_offset);
+        // The payload sits right after the trampoline on disk (cheap -
+        // container.zig's own buildOverlapHunk0Body doc comment) and
+        // gets relocated to its margin-safe tail position at runtime
+        // (stubs/common/runtime.i's OverlapMovePayload), not positioned
+        // there directly on disk.
+        const hunk0_body = try container.buildOverlapHunk0Body(arena, stub_trampoline, compressed.payload);
         const hunk1_body = try container.buildContainer(arena, image, compressed.backend_id, stub_bytes, compressed.payload, use_flash, killtwitch, margin, @intCast(stub_trampoline.len));
         return container.writeHunkExecutable(arena, hunk0_body, hunk1_body, allocated_size, image.mem_chip);
     }

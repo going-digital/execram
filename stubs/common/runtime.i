@@ -89,9 +89,10 @@ Start:
 	; input pointer (A0) is found differs.
 	btst	#3,HDR_FLAGS(a2)	; FLAG_OVERLAP
 	beq.s	.disjoint_payload
-	bsr.w	OverlapPayloadOffset	; defined near the end of this file, well past short-branch range - see that routine's own comment for what it does
+	bsr.w	OverlapPayloadOffset	; defined near the end of this file, well past short-branch range - D2 = payload_offset, D4 = align4(compressed_size)
+	bsr.w	OverlapMovePayload	; relocates the payload from its cheap on-disk position (right after the trampoline) to its margin-safe tail position (D2) - see that routine's own comment for why this step exists at all
 
-	lea	0(a4,d2.l),a0		; a0 = compressed payload, within final itself
+	lea	0(a4,d2.l),a0		; a0 = compressed payload, now safely positioned within final itself
 	bra.s	.havepayload
 .disjoint_payload:
 	lea	0(a2,d1.l),a0		; a0 = compressed payload, right after the header
@@ -214,8 +215,10 @@ RelocFixup:
 ; *reading* it, only about where the payload it describes lives).
 ;
 ; In: D0 = compressed_size, A2 = header base. Out: D2 = payload_offset
-; (bytes from `final`'s own base to where the payload starts). Clobbers
-; D1/D3; leaves D0 - the caller's own Depack input - untouched.
+; (bytes from `final`'s own base to where the payload starts), D4 =
+; align4(compressed_size) (OverlapMovePayload's own copy length input,
+; below). Clobbers D1/D3; leaves D0 - the caller's own Depack input -
+; untouched.
 ;
 ; Uses align4(compressed_size), not the raw value, throughout: the
 ; caller's own `final + payload_offset` must always land on a 4-byte
@@ -228,6 +231,7 @@ OverlapPayloadOffset:
 	move.l	d0,d2
 	addq.l	#3,d2
 	and.l	#-4,d2			; d2 = align4(compressed_size)
+	move.l	d2,d4			; d4 = align4(compressed_size), preserved for OverlapMovePayload's own use below (d2 itself gets overwritten with payload_offset further down)
 
 	; d1 = resident_tail_size = align4(code_data_size + max(bss_size, reloc_stream_size))
 	; - running max accumulator from here on.
@@ -272,6 +276,63 @@ OverlapPayloadOffset:
 
 	sub.l	d2,d1			; d1 = allocated_size - align4(compressed_size) = payload_offset
 	move.l	d1,d2			; d2 = payload_offset (return value)
+	rts
+
+; Relocates the compressed payload from its cheap on-disk position
+; (final + trampoline_size, right after the trampoline -
+; buildOverlapHunk0Body's own on-disk layout, container.zig) to its
+; margin-safe tail position (final + payload_offset), before Depack
+; runs - so hunk 0's own on-disk body only ever needs to hold
+; trampoline_size + compressed_size bytes, not payload_offset +
+; compressed_size. The earlier design put the payload directly at
+; payload_offset on disk, skipping this step entirely - but that meant
+; every byte between the trampoline's end and payload_offset had to be
+; materialized as literal zero padding in the packed file, since
+; AmigaDOS's own "declared hunk size > on-disk data length" trick only
+; ever leaves the *tail* of a hunk's allocation implicit, never a gap
+; in the middle. For any backend with a real compression ratio,
+; payload_offset ends up close to the full decompressed size (the
+; margin approaches decompressed_size - compressed_size for uniformly-
+; compressible data), so that on-disk padding very nearly cancelled out
+; the entire compression gain - a real, reported bug (shrinkler on a
+; 221KB real program: packed file 218848 bytes vs. 142120 without
+; --overlap). Shrinkler's own `--overlap` mode (docs/memory-lifecycle.md's
+; "Comparison" section, `HunkFile.h`'s per-hunk decrunch header) already
+; does exactly this relocation - its own decrunch header does the same
+; on-disk-cheap-position -> runtime-safe-position memmove per hunk
+; before decompressing that hunk in place.
+;
+; In: A2 = header base, A4 = final (resident base), D2 = payload_offset,
+; D4 = align4(compressed_size) - both straight from
+; OverlapPayloadOffset's own return values, unmodified. Out: none - D2
+; (the caller's own next use, right after this returns) is left
+; untouched; D0/A2/A4 also untouched. Clobbers D1/D3/A0/A1.
+;
+; A no-op (copies onto itself, byte for byte) whenever payload_offset
+; equals trampoline_size exactly (e.g. store, which measures a 0-byte
+; overlap margin - docs/algorithm-notes/store.md). Otherwise dest
+; (payload_offset) is always >= src (trampoline_size):
+; OverlapPayloadOffset's own on_disk_len bound
+; (trampoline_size + align4(compressed_size) <= allocated_size)
+; guarantees payload_offset can never land below trampoline_size. So
+; copying backward (highest address first, `move.l -(a0),-(a1)`) is
+; always the correct, safe direction here regardless of how much the
+; source and destination regions overlap - the standard rule for an
+; in-place memmove where dest >= src.
+OverlapMovePayload:
+	tst.l	d4
+	beq.s	.done			; nothing to move (a zero-length payload, if that's ever legal for some backend/input)
+	move.l	HDR_TRAMPOLINE_SIZE(a2),d3
+	lea	0(a4,d3.l),a0
+	adda.l	d4,a0			; a0 = src end (one past the last on-disk payload byte)
+	lea	0(a4,d2.l),a1
+	adda.l	d4,a1			; a1 = dest end (one past the last safe-position byte)
+	lsr.l	#2,d4			; d4 = longword count (guaranteed exact: d4 was already align4'd)
+.moveloop:
+	move.l	-(a0),-(a1)
+	subq.l	#1,d4
+	bne.s	.moveloop
+.done:
 	rts
 
 ; NOTE: StubEnd is NOT defined here. runtime.i is `include`d before each

@@ -7,9 +7,13 @@
 //! two-hunk shape and the same `writeHunkExecutable` - they differ only
 //! in what each hunk's own body contains: disjoint puts the compressed
 //! payload in hunk 1 (`buildContainer`, freed after use); overlap puts
-//! it at a computed tail offset within hunk 0 itself instead
-//! (`buildOverlapHunk0Body`), leaving hunk 1 with just the stub code and
-//! header (still freed after use, now much smaller).
+//! it right after the trampoline in hunk 0's own on-disk body instead
+//! (`buildOverlapHunk0Body`) - relocated to its computed, margin-safe
+//! tail position at runtime (`stubs/common/runtime.i`'s
+//! `OverlapMovePayload`), not already positioned there on disk, or the
+//! gap between the trampoline and that tail position would have to be
+//! materialized as literal file bytes - leaving hunk 1 with just the
+//! stub code and header (still freed after use, now much smaller).
 
 const std = @import("std");
 const flatten = @import("flatten.zig");
@@ -165,8 +169,10 @@ fn w32(list: *std.ArrayList(u8), a: std.mem.Allocator, b: *[4]u8, v: u32) !void 
 /// §8b): the default disjoint layout passes `stubs/common/trampoline.s`
 /// (hunk 0) and `buildContainer`'s full `stub_bytes ++ header ++
 /// payload` (hunk 1), `resident_size` = `residentTailSize`. The overlap
-/// layout passes `buildOverlapHunk0Body`'s trampoline+padding+payload
-/// (hunk 0, no separate payload in hunk 1 this time) and
+/// layout passes `buildOverlapHunk0Body`'s trampoline+payload (hunk 0,
+/// no padding on disk - relocated to its safe tail position at runtime,
+/// `stubs/common/runtime.i`'s `OverlapMovePayload` - no separate
+/// payload in hunk 1 this time) and
 /// `buildContainer`'s `stub_bytes ++ header` alone (hunk 1, built with a
 /// non-null `overlap_margin`), `resident_size` = `overlapAllocatedSize`.
 pub fn writeHunkExecutable(
@@ -246,13 +252,22 @@ pub fn residentTailSize(code_data_len: usize, bss_size: u32, reloc_stream_len: u
 /// `OverlapPayloadOffset`): the largest of -
 ///
 ///   1. on-disk fit: `trampoline_size + compressed_size` (hunk 0's own
-///      on-disk body, `buildOverlapHunk0Body`) must physically fit.
-///      Without this bound, a backend whose compressed_size ends up
-///      close to resident_tail_size - `store`, e.g., which never shrinks
-///      the input at all, so its own compressed_size routinely equals
-///      resident_tail_size exactly - can compute a payload offset of 0
-///      or less, overlapping the trampoline itself: a real bug found on
-///      real hardware (git history) before this bound was added;
+///      on-disk body, `buildOverlapHunk0Body`, is exactly this many
+///      bytes now - the payload sits right after the trampoline on
+///      disk, relocated to its safe tail position by a runtime step,
+///      `stubs/common/runtime.i`'s `OverlapMovePayload` - it no longer
+///      needs to already BE at that tail position on disk) must
+///      physically fit within the allocated size. Without this bound, a
+///      backend whose compressed_size ends up close to resident_tail_size
+///      - `store`, e.g., which never shrinks the input at all, so its
+///      own compressed_size routinely equals resident_tail_size exactly
+///      - can compute a payload offset of 0 or less, overlapping the
+///      trampoline itself: a real bug found on real hardware (git
+///      history) before this bound was added. This same bound also
+///      guarantees `payload_offset >= trampoline_size` unconditionally,
+///      which is what makes `OverlapMovePayload`'s own backward
+///      (highest-address-first) copy direction always safe, regardless
+///      of how much the on-disk and safe-tail positions overlap;
 ///   2. resident fit: `residentTailSize` above, same reason as the
 ///      disjoint layout's hunk 0;
 ///   3. overlap safety: the payload, tail-aligned, must lead the output
@@ -282,26 +297,35 @@ pub fn overlapAllocatedSize(trampoline_size: usize, compressed_size: u32, overla
 /// Builds hunk 0's own on-disk body for the overlap layout
 /// (docs/format-spec.md §8b): `trampoline_bytes` (byte-identical to the
 /// disjoint layout's own hunk 0 - stubs/common/trampoline.s is
-/// unaffected by which layout is in use) followed by zero padding out to
-/// `payload_offset`, then the compressed payload itself. AmigaDOS's
-/// LoadSeg always loads a hunk's on-disk bytes starting at that hunk's
-/// own data front, so this placement alone is what puts the payload at
-/// exactly the tail offset `stubs/common/runtime.i`'s
-/// `OverlapPayloadOffset` recomputes at runtime - no separate runtime
-/// "move to tail" step is needed (an earlier design here did need one,
-/// because it mistakenly put the depacker's own code in this same
-/// buffer; see docs/format-spec.md §8b's own note on why that's unsafe -
-/// this design keeps the depacker in hunk 1, untouched by any of this).
-/// `payload_offset` should be `allocated_size - align4(compressed_size)`
-/// (`overlapAllocatedSize` above), matching `OverlapPayloadOffset`
-/// exactly.
-pub fn buildOverlapHunk0Body(allocator: std.mem.Allocator, trampoline_bytes: []const u8, compressed_payload: []const u8, payload_offset: u32) ![]u8 {
-    std.debug.assert(payload_offset >= trampoline_bytes.len);
-    var out = try allocator.alloc(u8, payload_offset + compressed_payload.len);
+/// unaffected by which layout is in use) immediately followed by the
+/// compressed payload - nothing else. AmigaDOS's LoadSeg loads a hunk's
+/// on-disk bytes starting at that hunk's own data front and leaves the
+/// rest of its declared (larger) allocation implicit/uninitialized, so
+/// this on-disk body only ever needs to be `trampoline_size +
+/// compressed_size` bytes long, regardless of how large `overlap_margin`
+/// (and therefore the real allocated size, `overlapAllocatedSize` above)
+/// ends up being.
+///
+/// The payload is deliberately NOT placed at its eventual margin-safe
+/// tail position here - `stubs/common/runtime.i`'s `OverlapMovePayload`
+/// relocates it there at runtime, right before `Depack` runs, matching
+/// Shrinkler's own `--overlap` decrunch headers (`HunkFile.h`,
+/// `docs/memory-lifecycle.md`'s "Comparison" section - the same
+/// on-disk-cheap, runtime-relocate design, not something novel here).
+/// An earlier version of this function DID place the payload directly
+/// at `payload_offset` on disk, padded with zero bytes from the
+/// trampoline's end - avoiding a runtime relocation step at the cost of
+/// materializing that whole gap as literal file bytes. For any backend
+/// with a real compression ratio, that gap approaches the full
+/// decompressed size (the margin needed for uniformly-compressible data
+/// converges to decompressed_size - compressed_size), so the packed
+/// file ended up barely smaller than the original, uncompressed input -
+/// a real, reported bug, not just a missed optimization.
+pub fn buildOverlapHunk0Body(allocator: std.mem.Allocator, trampoline_bytes: []const u8, compressed_payload: []const u8) ![]u8 {
+    var out = try allocator.alloc(u8, trampoline_bytes.len + compressed_payload.len);
     errdefer allocator.free(out);
     @memcpy(out[0..trampoline_bytes.len], trampoline_bytes);
-    @memset(out[trampoline_bytes.len..payload_offset], 0);
-    @memcpy(out[payload_offset..], compressed_payload);
+    @memcpy(out[trampoline_bytes.len..], compressed_payload);
     return out;
 }
 
@@ -495,26 +519,31 @@ test "overlapAllocatedSize keeps the payload offset a multiple of 4 for odd comp
     }
 }
 
-test "buildOverlapHunk0Body places the payload at the given offset, zero-padded between" {
+test "buildOverlapHunk0Body places the payload right after the trampoline, no padding" {
     const trampoline = "TR"; // 2 bytes, arbitrary - real content is stubs/common/trampoline.s
     const payload = "PAYLOAD"; // 7 bytes, arbitrary
-    const body = try buildOverlapHunk0Body(std.testing.allocator, trampoline, payload, 10);
+    const body = try buildOverlapHunk0Body(std.testing.allocator, trampoline, payload);
     defer std.testing.allocator.free(body);
 
-    try std.testing.expectEqual(@as(usize, 17), body.len); // payload_offset(10) + payload.len(7)
+    // On-disk body is exactly trampoline.len + payload.len - no padding
+    // out to the eventual (much larger, margin-driven) allocated size:
+    // OverlapMovePayload (stubs/common/runtime.i) relocates the payload
+    // to its safe tail position at runtime instead.
+    try std.testing.expectEqual(@as(usize, 9), body.len);
     try std.testing.expectEqualSlices(u8, trampoline, body[0..2]);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 8), body[2..10]);
-    try std.testing.expectEqualSlices(u8, payload, body[10..17]);
+    try std.testing.expectEqualSlices(u8, payload, body[2..9]);
 }
 
-test "overlap layout round-trips through hunk.zig as two hunks, payload in hunk 0" {
+test "overlap layout round-trips through hunk.zig as two hunks, payload right after the trampoline in hunk 0" {
     const trampoline = "tramp!!"; // 7 bytes, arbitrary - real content is stubs/common/trampoline.s
     const payload = "COMPRESSEDPAYLOAD!!"; // 19 bytes, arbitrary
-    const payload_offset: u32 = 32; // arbitrary, >= trampoline.len
-    const hunk0_body = try buildOverlapHunk0Body(std.testing.allocator, trampoline, payload, payload_offset);
+    const hunk0_body = try buildOverlapHunk0Body(std.testing.allocator, trampoline, payload);
     defer std.testing.allocator.free(hunk0_body);
     const hunk1_body = "STUB+HEADER, NO PAYLOAD THIS TIME"; // stands in for buildContainer's own overlap-mode output (stub_bytes ++ header only)
-    const allocated_size: u32 = std.mem.alignForward(u32, @intCast(hunk0_body.len), 4) + 8; // >= hunk0_body.len, arbitrary extra headroom
+    // Declared allocated size is much larger than the on-disk body -
+    // this is the whole point: the gap (where OverlapMovePayload will
+    // relocate the payload to at runtime) is never materialized on disk.
+    const allocated_size: u32 = std.mem.alignForward(u32, @intCast(hunk0_body.len), 4) + 200;
 
     const exe_bytes = try writeHunkExecutable(std.testing.allocator, hunk0_body, hunk1_body, allocated_size, false);
     defer std.testing.allocator.free(exe_bytes);
@@ -525,12 +554,15 @@ test "overlap layout round-trips through hunk.zig as two hunks, payload in hunk 
     try std.testing.expectEqual(@as(usize, 2), file.hunks.len);
     try std.testing.expectEqual(hunk.HunkKind.code, file.hunks[0].kind);
     try std.testing.expectEqual(hunk.MemAttr.any, file.hunks[0].mem_attr);
-    // Hunk 0's real on-disk body is trampoline ++ zero padding ++
-    // payload - smaller than the declared allocated_size, same
-    // "declared bigger than real body" pattern the disjoint layout's own
-    // hunk 0 already uses.
+    // Hunk 0's real on-disk body is trampoline ++ payload only - smaller
+    // than the declared allocated_size, same "declared bigger than real
+    // body" pattern the disjoint layout's own hunk 0 already uses.
     try std.testing.expectEqualSlices(u8, trampoline, file.hunks[0].data[0..trampoline.len]);
-    try std.testing.expectEqualSlices(u8, payload, file.hunks[0].data[payload_offset..][0..payload.len]);
+    try std.testing.expectEqualSlices(u8, payload, file.hunks[0].data[trampoline.len..][0..payload.len]);
+    // On-disk data length is trampoline+payload rounded up to a
+    // longword (hunk sizes are always a whole number of longwords) -
+    // nowhere near the much larger declared allocated_size.
+    try std.testing.expectEqual(std.mem.alignForward(usize, trampoline.len + payload.len, 4), file.hunks[0].data.len);
 
     try std.testing.expectEqual(hunk.HunkKind.code, file.hunks[1].kind);
     try std.testing.expectEqual(hunk.MemAttr.any, file.hunks[1].mem_attr);

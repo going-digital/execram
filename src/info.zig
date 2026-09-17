@@ -273,8 +273,7 @@ test "printInfo reports an overlap-layout container's two hunks" {
     defer allocator.free(hunk1_body);
     const resident_tail = container.residentTailSize(image.code_data.len, image.bss_size, image.reloc_stream.len);
     const allocated_size = container.overlapAllocatedSize(trampoline.len, @intCast(payload.len), margin, resident_tail);
-    const payload_offset = allocated_size - @as(u32, @intCast(std.mem.alignForward(usize, payload.len, 4)));
-    const hunk0_body = try container.buildOverlapHunk0Body(allocator, trampoline, payload, payload_offset);
+    const hunk0_body = try container.buildOverlapHunk0Body(allocator, trampoline, payload);
     defer allocator.free(hunk0_body);
     const exe_bytes = try container.writeHunkExecutable(allocator, hunk0_body, hunk1_body, allocated_size, image.mem_chip);
     defer allocator.free(exe_bytes);

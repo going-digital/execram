@@ -273,22 +273,24 @@ Three build-time modes, three different outcomes for that one extra hunk:
 
 execram's own `--overlap` mode (`docs/format-spec.md` §8b) takes a
 noticeably different shape from Shrinkler's own `--overlap` at the
-mechanism level, even though the underlying idea (compressed and
+hunk-structure level, even though the underlying idea (compressed and
 decompressed data sharing a buffer, a proven-not-assumed margin
-separating them) is the same: Shrinkler adds one genuinely new hunk (its
-tiny `OverlapHeader` entry stub) on top of N real per-original hunks,
-each of which then decompresses *itself* in place. execram instead keeps
-its *existing* two-hunk shape (`docs/format-spec.md` §2) unchanged -
-hunk 0 the resident image, hunk 1 the depacker stub + header, still freed
-after use exactly as the default layout already does - and just moves
-*where the compressed payload physically sits*: into hunk 0's own
-on-disk body, at a computed tail offset, instead of trailing hunk 1.
-Hunk 1's own code is never at risk from `Depack`'s output (which only
-ever touches hunk 0), so there's no analogue of Shrinkler's
-never-freed entry stub here at all - execram's overlap layout frees
-*everything* scratch, same as its default layout, gaining only the
-compressed payload's own hunk-1 footprint back (a much smaller hunk 1,
-not a whole extra hunk).
+separating them, and - see below - a runtime memmove from a cheap
+on-disk position to that safe position) is now the same: Shrinkler adds
+one genuinely new hunk (its tiny `OverlapHeader` entry stub) on top of N
+real per-original hunks, each of which then decompresses *itself* in
+place. execram instead keeps its *existing* two-hunk shape
+(`docs/format-spec.md` §2) unchanged - hunk 0 the resident image, hunk 1
+the depacker stub + header, still freed after use exactly as the default
+layout already does - and just moves *where the compressed payload
+physically sits*: into hunk 0's own on-disk body (right after the
+trampoline), relocated by the runtime to a computed tail offset before
+`Depack` runs, instead of trailing hunk 1. Hunk 1's own code is never at
+risk from `Depack`'s output (which only ever touches hunk 0), so there's
+no analogue of Shrinkler's never-freed entry stub here at all - execram's
+overlap layout frees *everything* scratch, same as its default layout,
+gaining only the compressed payload's own hunk-1 footprint back (a much
+smaller hunk 1, not a whole extra hunk).
 
 `src/musashi_bench.zig`'s `measureOverlapMargin` plays `verify()`'s own
 role - it actually runs the depacker under real 68k emulation and
@@ -298,12 +300,34 @@ run inside `compressWithBackend` for every backend that supports the
 overlap layout. `execram pack --overlap=auto` (the default) then picks
 disjoint or overlap per file by comparing both layouts' real peak memory
 footprint (hunk 0 + hunk 1, both resident simultaneously in either
-layout), rather than Shrinkler's own build-time mode selection. No
-runtime "move the payload to where it needs to be" step exists at all -
-unlike Shrinkler's own per-hunk memmove, execram's payload already lands
-at the right on-disk offset the moment `LoadSeg` loads hunk 0, since the
-host tool (`src/container.zig`'s `buildOverlapHunk0Body`) places it there
-directly when writing the file.
+layout), rather than Shrinkler's own build-time mode selection.
+
+**A runtime "move the payload to where it needs to be" step does exist**
+- `stubs/common/runtime.i`'s `OverlapMovePayload`, a plain backward
+`move.l -(a0),-(a1)` copy loop, run once right before `Depack`, the same
+shape as Shrinkler's own per-hunk memmove. An earlier version of this
+page (and the code it described) claimed execram's own payload "already
+lands at the right on-disk offset the moment `LoadSeg` loads hunk 0" -
+true, but it turned out to be the wrong design: placing the payload
+directly at its final, margin-safe tail offset *on disk* meant every
+byte between the trampoline's end and that offset had to be
+materialized as literal file padding, since AmigaDOS's own "declared
+hunk size > on-disk data length" trick only ever leaves a hunk's *tail*
+implicit, never a gap in its middle. For any backend with a real
+compression ratio, that offset sits close to the full decompressed
+size (§8b's own margin-measurement note: the margin needed for
+uniformly-compressible data converges to decompressed_size -
+compressed_size), so the packed file ended up barely smaller than the
+original, uncompressed input - a real, reported bug (confirmed on a
+221KB real program packed with `shrinkler --overlap=on`: 218848 bytes,
+against 142120 without it). Reading Shrinkler's own decrunch headers
+more carefully - specifically *why* they bother with a runtime memmove
+at all, rather than just writing the payload straight to its safe
+position like this page originally assumed was possible for free -
+is what surfaced the fix: store the payload cheaply at hunk 0's own
+front on disk, and pay one small, fixed runtime cost (proportional to
+the compressed payload's own size, not to anything about the
+decompression loop itself) to relocate it before decompression begins.
 
 | | Extra scratch beyond the resident program | Ever freed? | Steady-state dead weight |
 |---|---|---|---|

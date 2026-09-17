@@ -316,12 +316,24 @@ shares. What differs is only
 contains*:
 
 - **Hunk 0** (`final`, the resident image): on disk, `trampoline.s`'s own
-  tiny body, then zero padding, then the compressed payload itself -
-  positioned at a computed tail offset (`payload_offset`) instead of hunk
-  0 being otherwise empty past the trampoline. `LoadSeg` loads this
-  exactly like any other hunk 0 (§8's own step 0-1): the payload simply
-  ends up sitting at `payload_offset` because that's where the on-disk
-  bytes put it, with no runtime repositioning needed at all.
+  tiny body immediately followed by the compressed payload - nothing
+  else (`buildOverlapHunk0Body`). `LoadSeg` loads this exactly like any
+  other hunk 0 (§8's own step 0-1), but the payload does **not** yet sit
+  at its eventual, margin-safe tail offset (`payload_offset`) - a new
+  runtime step, `OverlapMovePayload`, relocates it there (a backward,
+  highest-address-first copy, safe because `payload_offset` is always
+  `>= trampoline_size`) right before `Depack` runs. An earlier version of
+  this design instead placed the payload directly at `payload_offset` on
+  disk, zero-padded from the trampoline's end - cheaper at runtime (no
+  copy needed) but meaning that whole gap had to be materialized as
+  literal file bytes, which for any backend with a real compression
+  ratio approaches the *entire* size reduction compression achieved (see
+  "Margin measurement" below) - a real, reported bug (a 221KB real
+  program packed with `shrinkler --overlap=on` came out to 218848 bytes,
+  barely smaller than the original). Shrinkler's own `--overlap` decrunch
+  headers already do exactly this on-disk-cheap/runtime-relocate split
+  per hunk (`HunkFile.h`, `docs/memory-lifecycle.md`'s "Comparison"
+  section) - not a novel idea, this design just hadn't applied it yet.
 - **Hunk 1** (the scratch hunk, still freed after use exactly as §8
   describes): `stub_bytes ++ header` only - no payload appended this
   time, so it's now typically only a few hundred bytes instead of
@@ -339,27 +351,34 @@ regions exactly as in §8, `Depack` overlapping only with *itself* (its
 own input and output both living inside hunk 0), never with the code
 that's actively running it.
 
-The only step of §8's own algorithm that changes at all is how `Depack`'s
-own input pointer (A0) is found - `stubs/common/runtime.i`'s `Start:`
+Two steps of §8's own algorithm change - both entirely before `Depack`
+itself runs, and both live in `stubs/common/runtime.i`'s `Start:`, which
 branches on `FLAG_OVERLAP` right there and nowhere else:
 
 - **Disjoint** (flag clear, §8's own behavior): `A0 = header_base +
   header_size` - the payload right after the header, both within hunk 1.
-- **Overlap** (flag set): `A0 = final + payload_offset`, computed by a
-  small subroutine (`OverlapPayloadOffset`) entirely from header fields
-  already read on real hardware by the disjoint layout's own passing
-  boot tests (`code_data_size`, `bss_size`, `reloc_stream_size`,
-  `compressed_size`, `safety_margin`, and `trampoline_size` - §3's newest
-  field, needed because hunk 0's own on-disk body must have room for the
-  trampoline *before* the payload) - reproducing exactly the same
-  `overlapAllocatedSize` formula `src/container.zig` used to place the
-  payload on disk in the first place, so the two computations can never
-  drift apart. `align4(compressed_size)`, not the raw value, is used
-  throughout that formula: `payload_offset` must land on a 4-byte
+  No relocation step.
+- **Overlap** (flag set): a small subroutine, `OverlapPayloadOffset`,
+  computes `payload_offset` entirely from header fields already read on
+  real hardware by the disjoint layout's own passing boot tests
+  (`code_data_size`, `bss_size`, `reloc_stream_size`, `compressed_size`,
+  `safety_margin`, and `trampoline_size` - §3's newest field, needed
+  because hunk 0's own on-disk body must have room for the trampoline
+  *before* the payload) - reproducing exactly the same
+  `overlapAllocatedSize` formula `src/container.zig` used when sizing
+  hunk 0's own allocation in the first place, so the two computations can
+  never drift apart. `align4(compressed_size)`, not the raw value, is
+  used throughout that formula: `payload_offset` must land on a 4-byte
   boundary or a backend whose `Depack:` does any word/long access via A0
   (store's own bulk `move.l (a0)+,(a1)+` copy loop, e.g.) hits a genuine
   68000 Address Error the moment `compressed_size` happens to be odd -
-  found on real hardware before this rounding was added.
+  found on real hardware before this rounding was added. A second
+  subroutine, `OverlapMovePayload`, then relocates the payload from its
+  on-disk position (`final + trampoline_size`) to `final + payload_offset`
+  - a plain backward `move.l -(a0),-(a1)` copy loop, safe unconditionally
+  because `payload_offset >= trampoline_size` always holds (the same
+  on-disk-fit bound `OverlapPayloadOffset` already enforces). Only then
+  is `A0 = final + payload_offset` set, exactly as before.
 
 Every other step - `RelocFixup`, the BSS re-clear, detaching and
 `FreeMem`-ing hunk 1, the final `jmp final+0` - is **identical** between
@@ -374,14 +393,30 @@ is measured empirically per file at pack time
 `compressWithBackend` for every backend that supports the overlap
 layout), the same approach Shrinkler's own `--overlap` mode uses
 (`HunkFile.h`'s `verify()`, `docs/memory-lifecycle.md`'s Comparison
-section) - not a fixed per-backend theoretical formula. `execram pack
+section) - not a fixed per-backend theoretical formula. For data that
+compresses roughly uniformly throughout (typical of real executables),
+this margin is not a small, bounded quantity: at any point mid-decode,
+`bytes_written - bytes_read` tracks roughly `bytes_read × (decompressed
+size / compressed size - 1)`, growing across the whole decode and
+peaking near the end - so the worst-case margin converges toward
+`decompressed_size - compressed_size`, i.e. close to the *entire* size
+reduction the backend achieved (confirmed directly: shrinkler on a
+221KB real program measured a 74556-byte margin against a 74556-byte
+compression gain, 216111 -> 141555). This is exactly why
+`OverlapMovePayload` (above) matters: with the payload positioned
+directly at its final offset on disk (an earlier, since-corrected
+version of this design), that margin-sized gap had to be materialized
+as literal file padding. `execram pack
 --overlap=auto` (the default) then compares both layouts' real peak
 memory footprint for this specific file (hunk 0 + hunk 1, both resident
 simultaneously during decompression in either layout) and picks
-whichever is smaller; small payloads, or backends like `store` that
-never actually shrink the input, often keep using the disjoint layout,
-since the overlap layout's own on-disk-fit and alignment overhead can
-outweigh its savings there.
+whichever is smaller; only small payloads, or backends like `store` that
+never actually shrink the input at all (0-byte margin, so overlap adds
+no peak-memory benefit to offset its own small fixed overhead), tend to
+keep using the disjoint layout - `OverlapMovePayload` (above) means the
+overlap layout's on-disk cost is now just the trampoline plus the
+compressed payload itself, the same as the disjoint layout's own hunk 1,
+so on-disk size is no longer a factor either way in this comparison.
 
 ## 8c. In-loop decompression flicker (`FLAG_FLASH`/`FLAG_KILLTWITCH`)
 
