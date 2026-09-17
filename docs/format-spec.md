@@ -108,6 +108,13 @@ binary's length **is** the header's offset within hunk 1, by
 construction. Hunk 0's own trampoline needs no such lookup: it carries no
 header-aware logic at all (§8).
 
+This is the shape the disjoint layout (`flags` bit 3 clear) always
+produces. §8b describes the opt-in overlap layout, which changes both
+hunks' own sizes and contents (the compressed payload moves into hunk 0's
+own on-disk body, at a computed tail offset, instead of trailing hunk 1)
+but keeps this same two-hunk shape and the same trampoline/`Start:`
+mechanics otherwise.
+
 ## 3. Header layout
 
 All multi-byte fields are big-endian (native 68k byte order). All 4-byte
@@ -125,10 +132,14 @@ fields start at a 4-byte-aligned offset.
 | 12     | 4    | `code_data_size`      | Bytes of decompressed code+data (everything except BSS). |
 | 16     | 4    | `bss_size`            | Zero-filled bytes appended immediately after `code_data_size` in the final resident image. **Not present in the compressed payload** — BSS is pure zeros, compressing and decompressing it would waste time and (a little) space for nothing. |
 | 20     | 4    | `reloc_stream_size`   | Bytes of the reloc stream (§6), 0 if `flags` bit 1 is clear. |
-| 24     | 4    | `compressed_size`     | Bytes of the compressed payload, immediately following this header. |
-| 28     | 4    | `safety_margin`       | Reserved, must be 0 in v0 (see §8 — the compressed payload and the buffer being decompressed into never overlap in v0, so no backend-specific expansion margin is needed yet). |
+| 24     | 4    | `compressed_size`     | Bytes of the compressed payload. Disjoint layout (`flags` bit 3 clear, §8): immediately follows this header, in this same hunk. Overlap layout (bit 3 set, §8b): lives in hunk 0 instead, at a computed tail offset - this field is still what the stub reads to know how many bytes that payload is, just not where to find it directly. |
+| 28     | 4    | `safety_margin`       | 0 unless `flags` bit 3 (`FLAG_OVERLAP`, §5) is set. When set, the minimum gap in bytes the compressed payload must lead the decompression output by for `Depack` to run safely sharing hunk 0 (§8b's overlap runtime algorithm) — measured per-file at pack time (`src/musashi_bench.zig`'s `measureOverlapMargin`), not a fixed per-backend constant. Read directly by `OverlapPayloadOffset` (§8b) as one input to recomputing the payload's own position - unused by the disjoint layout. |
+| 32     | 4    | `trampoline_size`     | Bytes of `stubs/common/trampoline.s`'s own assembled body - the same fixed, backend-agnostic value for every file a given execram build produces. Written unconditionally regardless of layout; only `OverlapPayloadOffset` (§8b) reads it, to know how much of hunk 0's own on-disk body the trampoline itself needs before the payload can start. |
 
-Header size in v0: 32 bytes.
+Header size in v0: 36 bytes (32 through the format's first release; grown
+by 4 for `trampoline_size` when the overlap layout, §8b, was added - see
+`header_size`'s own row above for why a stub never needs a hardcoded
+constant to find the payload despite this).
 
 The **resident image size** (what the running program itself actually
 uses) is `code_data_size + bss_size`, computed, not stored — there's no
@@ -166,7 +177,8 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 | 0   | `MEM_CHIP` | Allocate hunk 0 (the resident image, §2) in Chip RAM (`MEMF_CHIP`). Clear means `MEMF_ANY` — a binary choice, decided by `execram pack` from the original executable's own hunk memory attributes (any hunk requesting Chip RAM sets it for the whole merged image) and overridable via `--mem=chip\|fast` (`src/main.zig`, `container.zig`'s `mem_chip` field). Only hunk 0 is affected either way — hunk 1 (the scratch stub+header+payload hunk) is always plain `MEMF_ANY`, regardless of this bit, since it's freed long before decompression is done and never needs Chip-RAM addressability itself. |
 | 1   | `HAS_RELOCS` | A reloc stream follows the code+data in the decompressed payload (§6). If clear, `reloc_stream_size` must be 0 and the fixup pass is skipped entirely. |
 | 2   | `FLASH` | Purely cosmetic, no effect on decoding: the stub sets `COLOR00` (the background/border colour register, `$dff180`) to a fixed bright colour immediately before calling the backend's `Depack:`, and restores it to black immediately after — a visible "something is happening" indicator for slow backends on real hardware, where a large file can otherwise sit at a blank screen for tens of seconds with no sign the machine hasn't hung. Set by `execram pack --flash`. |
-| 3-7 | *(reserved)* | Must be 0 in v0. A stub must ignore reserved bits it doesn't understand rather than reject the file — only a `version_major` bump means "you must understand this to run me correctly." |
+| 3   | `OVERLAP` | True overlap-in-place decompression (§8b): still §2's ordinary two-hunk load file, but the compressed payload lives at a computed tail offset within hunk 0 itself (the resident image) instead of right after the header in hunk 1 (which is still present, still freed after use, just much smaller without the payload), and `safety_margin` above is a real, meaningful value instead of the always-0 it is when this bit is clear. Set by `execram pack --overlap=on\|auto` when the chosen backend supports the overlap layout (every backend does — §8b). |
+| 4-7 | *(reserved)* | Must be 0 in v0. A stub must ignore reserved bits it doesn't understand rather than reject the file — only a `version_major` bump means "you must understand this to run me correctly." |
 
 **Known limitation, inherited from flattening multiple hunks into one:**
 if the original program had some hunks that needed Chip RAM and others
@@ -284,13 +296,91 @@ it - a real bug once, caught only by a synthetic test program whose
 executable tried before it had `bss_size` dominate and masked the
 overflow completely).
 
-This isn't full in-place/overlapping decompression the way Shrinkler's
-own `OverlapHeader.S` does it (compressed and decompressed data sharing
-even the *same* bytes, needing a backend-specific worst-case expansion
-bound to prove it's always safe) - `safety_margin` remains reserved
-and pinned to 0 for that reason. Hunk 1 (still holding the compressed
-payload) and `final` (hunk 0) are always two disjoint memory regions;
-Depack reads from one and writes to the other, never overlapping.
+This is `execram pack`'s **default** layout - it isn't full in-place/
+overlapping decompression the way Shrinkler's own `OverlapHeader.S` does
+it (compressed and decompressed data sharing even the *same* bytes,
+needing a backend-specific worst-case expansion bound to prove it's
+always safe). Hunk 1 (still holding the compressed payload) and `final`
+(hunk 0) are always two disjoint memory regions; Depack reads from one
+and writes to the other, never overlapping. §8b below covers the
+opt-in alternative that does overlap.
+
+## 8b. Overlap-mode runtime algorithm (`FLAG_OVERLAP`)
+
+`execram pack --overlap=on|auto` still produces §2's ordinary **two**-hunk
+load file - same `writeHunkExecutable`, same trampoline, same
+`stubs/common/runtime.i` `Start:` label every backend's stub already
+shares. What differs is only
+*where the compressed payload lives* and *what each hunk's own body
+contains*:
+
+- **Hunk 0** (`final`, the resident image): on disk, `trampoline.s`'s own
+  tiny body, then zero padding, then the compressed payload itself -
+  positioned at a computed tail offset (`payload_offset`) instead of hunk
+  0 being otherwise empty past the trampoline. `LoadSeg` loads this
+  exactly like any other hunk 0 (§8's own step 0-1): the payload simply
+  ends up sitting at `payload_offset` because that's where the on-disk
+  bytes put it, with no runtime repositioning needed at all.
+- **Hunk 1** (the scratch hunk, still freed after use exactly as §8
+  describes): `stub_bytes ++ header` only - no payload appended this
+  time, so it's now typically only a few hundred bytes instead of
+  carrying the whole compressed payload.
+
+This shape is deliberately *not* what an earlier version of this design
+tried (compressed payload and depacker code sharing a single hunk,
+decompression output overwriting the depacker's own executing
+instructions) - a genuine self-modifying-code bug caught by real-hardware
+boot testing, not host-side unit tests, since those never actually
+execute the assembled stub against realistically-shaped memory. Keeping
+the depacker's own code in hunk 1 (never touched by `Depack`'s own
+output) is what makes this safe: the two hunks stay genuinely disjoint
+regions exactly as in §8, `Depack` overlapping only with *itself* (its
+own input and output both living inside hunk 0), never with the code
+that's actively running it.
+
+The only step of §8's own algorithm that changes at all is how `Depack`'s
+own input pointer (A0) is found - `stubs/common/runtime.i`'s `Start:`
+branches on `FLAG_OVERLAP` right there and nowhere else:
+
+- **Disjoint** (flag clear, §8's own behavior): `A0 = header_base +
+  header_size` - the payload right after the header, both within hunk 1.
+- **Overlap** (flag set): `A0 = final + payload_offset`, computed by a
+  small subroutine (`OverlapPayloadOffset`) entirely from header fields
+  already read on real hardware by the disjoint layout's own passing
+  boot tests (`code_data_size`, `bss_size`, `reloc_stream_size`,
+  `compressed_size`, `safety_margin`, and `trampoline_size` - §3's newest
+  field, needed because hunk 0's own on-disk body must have room for the
+  trampoline *before* the payload) - reproducing exactly the same
+  `overlapAllocatedSize` formula `src/container.zig` used to place the
+  payload on disk in the first place, so the two computations can never
+  drift apart. `align4(compressed_size)`, not the raw value, is used
+  throughout that formula: `payload_offset` must land on a 4-byte
+  boundary or a backend whose `Depack:` does any word/long access via A0
+  (store's own bulk `move.l (a0)+,(a1)+` copy loop, e.g.) hits a genuine
+  68000 Address Error the moment `compressed_size` happens to be odd -
+  found on real hardware before this rounding was added.
+
+Every other step - `RelocFixup`, the BSS re-clear, detaching and
+`FreeMem`-ing hunk 1, the final `jmp final+0` - is **identical** between
+the two modes, reading the header directly exactly as §8 already
+describes: nothing about the header's own safety changes, since hunk 1
+(where it lives) is never written by `Depack` in either mode.
+
+**Margin measurement**: `safety_margin` (§3) - the minimum gap
+`payload_offset` must leave ahead of the output's own write position -
+is measured empirically per file at pack time
+(`src/musashi_bench.zig`'s `measureOverlapMargin`, run inside
+`compressWithBackend` for every backend that supports the overlap
+layout), the same approach Shrinkler's own `--overlap` mode uses
+(`HunkFile.h`'s `verify()`, `docs/memory-lifecycle.md`'s Comparison
+section) - not a fixed per-backend theoretical formula. `execram pack
+--overlap=auto` (the default) then compares both layouts' real peak
+memory footprint for this specific file (hunk 0 + hunk 1, both resident
+simultaneously during decompression in either layout) and picks
+whichever is smaller; small payloads, or backends like `store` that
+never actually shrink the input, often keep using the disjoint layout,
+since the overlap layout's own on-disk-fit and alignment overhead can
+outweigh its savings there.
 
 ## 9. Versioning policy
 
@@ -322,12 +412,23 @@ safely ignore (a newly-meaningful reserved flag bit, say).
   section) instead of a single loaded hunk. The container is now two
   hunks (§2); hunk 1 (stub+header+payload) is freed once decompression
   finishes (§8), leaving steady-state memory at exactly the resident
-  image size, matching Shrinkler's own default mode's result. True
-  overlap-in-place decompression (compressed and decompressed data
-  sharing the *same* bytes, the way Shrinkler's `--overlap` mode does
-  it, rather than two disjoint hunks) remains open - it needs a proven
-  safety-margin formula per backend before it can ship; each backend's
-  `docs/algorithm-notes/` entry should derive one when ready.
+  image size, matching Shrinkler's own default mode's result.
+- ~~True overlap-in-place decompression (compressed and decompressed
+  data sharing the *same* bytes, the way Shrinkler's `--overlap` mode
+  does it, rather than two disjoint hunks) remains open~~ — shipped, for
+  **every backend** (`--overlap=on|auto`, §8b, `FLAG_OVERLAP`):
+  `stubs/common/runtime.i`'s `FLAG_OVERLAP` branch and
+  `OverlapPayloadOffset` are shared unconditionally by every backend's
+  stub - no per-backend assembly work was ever needed, only
+  `src/main.zig`'s `compressWithBackend` measuring a margin
+  (`supports_overlap`) for each one. Rather than a generic theoretical
+  per-backend formula, `safety_margin` is measured empirically per file
+  at pack time (`src/musashi_bench.zig`'s `measureOverlapMargin`), the
+  same approach Shrinkler's own `--overlap` mode uses (`HunkFile.h`'s
+  `verify()`). `docs/algorithm-notes/`'s per-backend entries note their
+  own measured margin behavior where it's genuinely backend-specific
+  (`store.md`/`zx0.md`'s sections - most other backends behave like one
+  of those two: `store` near-zero, everything else data-dependent).
 - CPU-tiered stubs (68000 vs. 68020+), noted as an open question in
   [PROJECT_PLAN.md](../PROJECT_PLAN.md) §10, would most naturally live as
   another `flags` bit or a small stub-selection table in the host tool,

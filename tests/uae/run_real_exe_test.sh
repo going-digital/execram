@@ -62,6 +62,25 @@ HEARTBEAT_WAIT_SECONDS=10 # extra time to confirm continued output afterward
 VASM="${EXECRAM_VASM:-vasmm68k_mot}"
 
 BACKENDS=(store inflate zultra zx0 salvador shrinkler)
+# Overlap-mode layout (docs/format-spec.md §8b, FLAG_OVERLAP) - every
+# backend supports it (stubs/common/runtime.i's FLAG_OVERLAP branch is
+# shared unconditionally by every stub). --overlap defaults to auto, so
+# the plain BACKENDS loop above already implicitly exercises the overlap
+# layout for whichever backends auto's own peak-memory comparison
+# prefers it for - which, for this corpus's own resident-image size,
+# tends to be most of them (zx0/salvador included - deliberately not
+# repeated below, since forcing --overlap=on again for them would just
+# re-run their own slow host-side compression for no new coverage).
+# These two extra loops make real-hardware coverage explicit rather than
+# incidental: OVERLAP_BACKENDS forces --overlap=on for a representative
+# sample beyond what auto already covers (shrinkler for its own
+# register-save history - see stubs/shrinkler/stub.s's own comment on a
+# real past bug there - and lz4small for the LZ4 family), and
+# DISJOINT_BACKENDS forces --overlap=off so the plain, original layout
+# stays under real-hardware test too, not just whatever auto happens to
+# prefer for this specific corpus.
+OVERLAP_BACKENDS=(store shrinkler lz4small)
+DISJOINT_BACKENDS=(inflate shrinkler)
 
 if [ -z "${EXECRAM_KICKSTART:-}" ]; then
   echo "error: set EXECRAM_KICKSTART to a Kickstart ROM path (see run_boot_test.sh's header)" >&2
@@ -103,6 +122,104 @@ EXECRAM="$REPO_ROOT/zig-out/bin/execram"
 declare -A RESULTS
 ITEMS=()
 
+# Packs $2 (an original exe) with the given pack args, boots the result
+# under FS-UAE via a genuine AmigaDOS launch, and records PASS/FAIL into
+# RESULTS["$1:$3"] - shared by the plain-backend loop and the overlap-
+# layout loop below (docs/format-spec.md §8b) so both go through the
+# exact same boot/sentinel/heartbeat logic, keyed by whatever label ($3)
+# the caller wants in the results table.
+# Args: name exe_path label pack_arg...
+run_one_boot_test() {
+  local name="$1" exe_path="$2" label="$3"
+  shift 3
+  local pack_args=("$@")
+
+  echo "-- $name / $label --"
+  local PACKED="$WORK_DIR/${name}_${label}.exe"
+  if ! "$EXECRAM" pack "${pack_args[@]}" "$exe_path" "$PACKED" 2>&1 | sed 's/^/   /'; then
+    echo "   FAIL(pack)"
+    RESULTS["$name:$label"]="FAIL(pack)"
+    return
+  fi
+
+  local SERIAL_LOG="$WORK_DIR/${name}_${label}_serial.log"
+  local SLAVE_PATH_FILE="$WORK_DIR/${name}_${label}_slave.txt"
+  touch "$SERIAL_LOG"
+  python3 "$SCRIPT_DIR/boot/pty_bridge.py" "$SERIAL_LOG" $((BOOT_TIMEOUT_CHECKS / 2 + HEARTBEAT_WAIT_SECONDS + 10)) >"$SLAVE_PATH_FILE" &
+  CUR_BRIDGE_PID=$!
+  for _ in $(seq 1 20); do
+    [ -s "$SLAVE_PATH_FILE" ] && break
+    sleep 0.1
+  done
+  local SLAVE_PATH
+  SLAVE_PATH="$(cat "$SLAVE_PATH_FILE" 2>/dev/null || true)"
+  if [ -z "$SLAVE_PATH" ]; then
+    echo "   FAIL(bridge)"
+    RESULTS["$name:$label"]="FAIL(bridge)"
+    kill "$CUR_BRIDGE_PID" 2>/dev/null
+    wait "$CUR_BRIDGE_PID" 2>/dev/null
+    CUR_BRIDGE_PID=""
+    return
+  fi
+
+  local FSUAE_LOG="$WORK_DIR/${name}_${label}_fsuae.log"
+  # Straight at the packed executable file - no disk image built by us
+  # at all. See this script's own header for why this works.
+  "$FSUAE_BIN" \
+    --kickstart_file="$EXECRAM_KICKSTART" \
+    --floppy_drive_0="$PACKED" \
+    --floppy_drive_count=1 \
+    --serial_port="$SLAVE_PATH" \
+    --fullscreen=0 \
+    --amiga_model=A500 \
+    --window_width=200 --window_height=100 \
+    >"$FSUAE_LOG" 2>&1 &
+  CUR_FSUAE_PID=$!
+
+  local found=0
+  for _ in $(seq 1 "$BOOT_TIMEOUT_CHECKS"); do
+    if grep -qF "$SENTINEL" "$SERIAL_LOG" 2>/dev/null; then
+      found=1
+      break
+    fi
+    sleep 0.5
+  done
+
+  if [ "$found" -ne 1 ]; then
+    echo "   FAIL(no-sentinel)"
+    RESULTS["$name:$label"]="FAIL(no-sentinel)"
+  elif [ "$HEARTBEAT_CHECK" = "1" ]; then
+    local n1 n2
+    n1="$(wc -c <"$SERIAL_LOG" | tr -d ' ')"
+    sleep "$HEARTBEAT_WAIT_SECONDS"
+    n2="$(wc -c <"$SERIAL_LOG" | tr -d ' ')"
+    if [ "${n2:-0}" -gt "${n1:-0}" ]; then
+      echo "   PASS (sentinel + still running: $n1 -> $n2 bytes)"
+      RESULTS["$name:$label"]="PASS"
+    else
+      echo "   FAIL(no-heartbeat) (stuck at $n1 bytes for ${HEARTBEAT_WAIT_SECONDS}s after sentinel)"
+      RESULTS["$name:$label"]="FAIL(no-heartbeat)"
+    fi
+  else
+    echo "   PASS (sentinel seen)"
+    RESULTS["$name:$label"]="PASS"
+  fi
+
+  kill "$CUR_FSUAE_PID" 2>/dev/null
+  kill "$CUR_BRIDGE_PID" 2>/dev/null
+  wait "$CUR_FSUAE_PID" 2>/dev/null
+  wait "$CUR_BRIDGE_PID" 2>/dev/null
+  CUR_FSUAE_PID=""
+  CUR_BRIDGE_PID=""
+
+  if [ "${RESULTS["$name:$label"]}" != "PASS" ]; then
+    echo "   --- serial log so far ---"
+    cat "$SERIAL_LOG" | sed 's/^/   /'
+    echo "   --- fs-uae log tail ---"
+    tail -10 "$FSUAE_LOG" | sed 's/^/   /'
+  fi
+}
+
 for meta_path in "${META_FILES[@]}"; do
   name="$(basename "$meta_path" .meta)"
   exe_path="$CORPUS_DIR/$name.exe"
@@ -124,108 +241,41 @@ for meta_path in "${META_FILES[@]}"; do
   fi
 
   for backend in "${BACKENDS[@]}"; do
-    echo "-- $name / $backend --"
-    PACKED="$WORK_DIR/${name}_${backend}.exe"
-    if ! "$EXECRAM" pack "--backend=$backend" "$exe_path" "$PACKED" 2>&1 | sed 's/^/   /'; then
-      echo "   FAIL(pack)"
-      RESULTS["$name:$backend"]="FAIL(pack)"
-      continue
-    fi
-
-    SERIAL_LOG="$WORK_DIR/${name}_${backend}_serial.log"
-    SLAVE_PATH_FILE="$WORK_DIR/${name}_${backend}_slave.txt"
-    touch "$SERIAL_LOG"
-    python3 "$SCRIPT_DIR/boot/pty_bridge.py" "$SERIAL_LOG" $((BOOT_TIMEOUT_CHECKS / 2 + HEARTBEAT_WAIT_SECONDS + 10)) >"$SLAVE_PATH_FILE" &
-    CUR_BRIDGE_PID=$!
-    for _ in $(seq 1 20); do
-      [ -s "$SLAVE_PATH_FILE" ] && break
-      sleep 0.1
-    done
-    SLAVE_PATH="$(cat "$SLAVE_PATH_FILE" 2>/dev/null || true)"
-    if [ -z "$SLAVE_PATH" ]; then
-      echo "   FAIL(bridge)"
-      RESULTS["$name:$backend"]="FAIL(bridge)"
-      kill "$CUR_BRIDGE_PID" 2>/dev/null
-      wait "$CUR_BRIDGE_PID" 2>/dev/null
-      CUR_BRIDGE_PID=""
-      continue
-    fi
-
-    FSUAE_LOG="$WORK_DIR/${name}_${backend}_fsuae.log"
-    # Straight at the packed executable file - no disk image built by
-    # us at all. See this script's own header for why this works.
-    "$FSUAE_BIN" \
-      --kickstart_file="$EXECRAM_KICKSTART" \
-      --floppy_drive_0="$PACKED" \
-      --floppy_drive_count=1 \
-      --serial_port="$SLAVE_PATH" \
-      --fullscreen=0 \
-      --amiga_model=A500 \
-      --window_width=200 --window_height=100 \
-      >"$FSUAE_LOG" 2>&1 &
-    CUR_FSUAE_PID=$!
-
-    found=0
-    for _ in $(seq 1 "$BOOT_TIMEOUT_CHECKS"); do
-      if grep -qF "$SENTINEL" "$SERIAL_LOG" 2>/dev/null; then
-        found=1
-        break
-      fi
-      sleep 0.5
-    done
-
-    if [ "$found" -ne 1 ]; then
-      echo "   FAIL(no-sentinel)"
-      RESULTS["$name:$backend"]="FAIL(no-sentinel)"
-    elif [ "$HEARTBEAT_CHECK" = "1" ]; then
-      n1="$(wc -c <"$SERIAL_LOG" | tr -d ' ')"
-      sleep "$HEARTBEAT_WAIT_SECONDS"
-      n2="$(wc -c <"$SERIAL_LOG" | tr -d ' ')"
-      if [ "${n2:-0}" -gt "${n1:-0}" ]; then
-        echo "   PASS (sentinel + still running: $n1 -> $n2 bytes)"
-        RESULTS["$name:$backend"]="PASS"
-      else
-        echo "   FAIL(no-heartbeat) (stuck at $n1 bytes for ${HEARTBEAT_WAIT_SECONDS}s after sentinel)"
-        RESULTS["$name:$backend"]="FAIL(no-heartbeat)"
-      fi
-    else
-      echo "   PASS (sentinel seen)"
-      RESULTS["$name:$backend"]="PASS"
-    fi
-
-    kill "$CUR_FSUAE_PID" 2>/dev/null
-    kill "$CUR_BRIDGE_PID" 2>/dev/null
-    wait "$CUR_FSUAE_PID" 2>/dev/null
-    wait "$CUR_BRIDGE_PID" 2>/dev/null
-    CUR_FSUAE_PID=""
-    CUR_BRIDGE_PID=""
-
-    if [ "${RESULTS["$name:$backend"]}" != "PASS" ]; then
-      echo "   --- serial log so far ---"
-      cat "$SERIAL_LOG" | sed 's/^/   /'
-      echo "   --- fs-uae log tail ---"
-      tail -10 "$FSUAE_LOG" | sed 's/^/   /'
-    fi
+    run_one_boot_test "$name" "$exe_path" "$backend" "--backend=$backend"
+  done
+  for backend in "${OVERLAP_BACKENDS[@]}"; do
+    run_one_boot_test "$name" "$exe_path" "${backend}-overlap" "--backend=$backend" "--overlap=on"
+  done
+  for backend in "${DISJOINT_BACKENDS[@]}"; do
+    run_one_boot_test "$name" "$exe_path" "${backend}-disjoint" "--backend=$backend" "--overlap=off"
   done
 done
 
 echo ""
 echo "=== Real-executable test matrix ==="
 
+ALL_LABELS=("${BACKENDS[@]}")
+for backend in "${OVERLAP_BACKENDS[@]}"; do
+  ALL_LABELS+=("${backend}-overlap")
+done
+for backend in "${DISJOINT_BACKENDS[@]}"; do
+  ALL_LABELS+=("${backend}-disjoint")
+done
+
 overall_pass=1
 for name in "${ITEMS[@]}"; do
-  for b in "${BACKENDS[@]}"; do
+  for b in "${ALL_LABELS[@]}"; do
     [ "${RESULTS["$name:$b"]:-?}" = "PASS" ] || overall_pass=0
   done
 done
 
 {
   header="item"
-  for b in "${BACKENDS[@]}"; do header+=$'\t'"$b"; done
+  for b in "${ALL_LABELS[@]}"; do header+=$'\t'"$b"; done
   echo "$header"
   for name in "${ITEMS[@]}"; do
     row="$name"
-    for b in "${BACKENDS[@]}"; do
+    for b in "${ALL_LABELS[@]}"; do
       row+=$'\t'"${RESULTS["$name:$b"]:-?}"
     done
     echo "$row"

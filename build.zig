@@ -41,7 +41,7 @@ const stubs = [_]Stub{
         .name = "stub_store",
         .source = "stubs/store/stub.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i" },
+        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/store/depack_core.s" },
     },
     .{
         .name = "stub_inflate",

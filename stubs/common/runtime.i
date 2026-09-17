@@ -61,9 +61,9 @@ Start:
 	lea	StubEnd(pc),a2		; a2 = header base, preserved throughout
 
 	cmp.l	#MAGIC,HDR_MAGIC(a2)
-	bne.s	Fail			; measured 124 bytes away - fits a short branch
+	bne.w	Fail			; the FLAG_OVERLAP payload-offset block between here and Fail: no longer fits a short branch
 	cmp.b	#VERSION_MAJOR_V0,HDR_VERSION_MAJOR(a2)
-	bne.s	Fail			; measured 114 bytes away - fits a short branch
+	bne.w	Fail
 
 	move.l	4.w,a6			; ExecBase
 
@@ -85,10 +85,30 @@ Start:
 
 	; Depack(compressed payload -> final)
 	moveq	#0,d1
-	move.w	HDR_HEADER_SIZE(a2),d1
-	lea	0(a2,d1.l),a0		; a0 = compressed payload
+	move.w	HDR_HEADER_SIZE(a2),d1		; d1 = header_size (used by the disjoint branch below only)
+	move.l	HDR_COMPRESSED_SIZE(a2),d0	; d0 = compressed_size - Depack's own D0 input; stays raw/unrounded throughout, whichever branch below runs
+
+	; docs/format-spec.md §8b: FLAG_OVERLAP selects true overlap-in-place
+	; decompression - the compressed payload lives at a computed tail
+	; offset within `final` (hunk 0) itself, placed there on disk by
+	; container.zig's buildOverlapHunk0Body, instead of right after
+	; the header in this (hunk 1) scratch hunk as the disjoint layout
+	; below always has. Everything else in this file - RelocFixup,
+	; BSS-clear, detach+free (below), even the trampoline-supplied A4
+	; itself - is identical either way: `final` and this hunk's own
+	; header are still two disjoint memory regions in both modes, so
+	; nothing about their own safety changes; only where Depack's own
+	; input pointer (A0) is found differs.
+	btst	#3,HDR_FLAGS(a2)	; FLAG_OVERLAP
+	beq.s	.disjoint_payload
+	bsr.w	OverlapPayloadOffset	; defined near the end of this file, well past short-branch range - see that routine's own comment for what it does
+
+	lea	0(a4,d2.l),a0		; a0 = compressed payload, within final itself
+	bra.s	.havepayload
+.disjoint_payload:
+	lea	0(a2,d1.l),a0		; a0 = compressed payload, right after the header
+.havepayload:
 	move.l	a4,a1			; a1 = output = final, directly
-	move.l	HDR_COMPRESSED_SIZE(a2),d0
 
 	btst	#2,HDR_FLAGS(a2)	; FLAG_FLASH
 	beq.s	.noflashon
@@ -195,6 +215,76 @@ RelocFixup:
 	move.l	d2,(a4,d6.l)
 	bra.s	.next
 .done:
+	rts
+
+; docs/format-spec.md §8b's overlap-mode payload positioning, only ever
+; reached when FLAG_OVERLAP is set. Recomputes the same tail offset
+; container.zig's own overlapAllocatedSize already used to place the
+; payload on disk (so the two can never drift apart), entirely from
+; header fields - no LoadSeg ABI dependency of any kind (unlike this
+; file's own free-hunk-1 step below, this routine runs on hunk 1's own,
+; still perfectly ordinary header - nothing overlap-specific about
+; *reading* it, only about where the payload it describes lives).
+;
+; In: D0 = compressed_size, A2 = header base. Out: D2 = payload_offset
+; (bytes from `final`'s own base to where the payload starts). Clobbers
+; D1/D3; leaves D0 - the caller's own Depack input - untouched.
+;
+; Uses align4(compressed_size), not the raw value, throughout: the
+; caller's own `final + payload_offset` must always land on a 4-byte
+; boundary, or the first word/long access any backend's Depack makes
+; via A0 is a genuine 68000 Address Error (confirmed on real hardware -
+; see the commit that found this) whenever compressed_size itself is
+; odd. Rounding up costs at most 3 bytes of harmless trailing padding
+; after the real payload.
+OverlapPayloadOffset:
+	move.l	d0,d2
+	addq.l	#3,d2
+	and.l	#-4,d2			; d2 = align4(compressed_size)
+
+	; d1 = resident_tail_size = align4(code_data_size + max(bss_size, reloc_stream_size))
+	; - running max accumulator from here on.
+	move.l	HDR_BSS_SIZE(a2),d1
+	move.l	HDR_RELOC_STREAM_SIZE(a2),d3
+	cmp.l	d3,d1
+	bge.s	.residtail_have_max
+	move.l	d3,d1
+.residtail_have_max:
+	add.l	HDR_CODE_DATA_SIZE(a2),d1
+	addq.l	#3,d1
+	and.l	#-4,d1			; d1 = resident_tail_size
+
+	; d3 = on_disk_len = trampoline_size + align4(compressed_size): the
+	; trampoline itself (hunk 0's own on-disk prefix, always present
+	; ahead of the payload - stubs/common/trampoline.s, buildOverlapHunk0Body)
+	; must physically fit before the payload's own tail-aligned start.
+	; Without this bound, a backend whose compressed_size ends up close
+	; to resident_tail_size (store, e.g. - it never shrinks the input at
+	; all, so its own compressed_size routinely equals resident_tail_size
+	; exactly) can compute a payload_offset of 0 or less, overlapping the
+	; trampoline itself - a real bug found on real hardware (git
+	; history) before this bound was added.
+	move.l	HDR_TRAMPOLINE_SIZE(a2),d3
+	add.l	d2,d3
+	cmp.l	d3,d1
+	bge.s	.have_second_max
+	move.l	d3,d1
+.have_second_max:
+
+	; d3 = overlap_min = safety_margin + align4(compressed_size)
+	move.l	HDR_SAFETY_MARGIN(a2),d3
+	add.l	d2,d3
+
+	; d1 = align4(max(d1, overlap_min)) = allocated_size
+	cmp.l	d3,d1
+	bge.s	.have_allocated_size
+	move.l	d3,d1
+.have_allocated_size:
+	addq.l	#3,d1
+	and.l	#-4,d1			; d1 = allocated_size
+
+	sub.l	d2,d1			; d1 = allocated_size - align4(compressed_size) = payload_offset
+	move.l	d1,d2			; d2 = payload_offset (return value)
 	rts
 
 ; NOTE: StubEnd is NOT defined here. runtime.i is `include`d before each

@@ -93,7 +93,7 @@ const usage =
     \\
     \\Usage:
     \\  execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|most|auto]
-    \\               [--mem=chip|fast] [-v] [--flash] <in> <out>
+    \\               [--mem=chip|fast] [--overlap=on|off|auto] [-v] [--flash] <in> <out>
     \\  execram info <packed-exe>
     \\  execram bench [--all] <in>
     \\  execram --version
@@ -138,6 +138,23 @@ const usage =
     \\needs Chip RAM (custom chip DMA, audio/blitter buffers, ...) will
     \\build successfully but can fail or misbehave when run - only
     \\override this if you're sure.
+    \\
+    \\--overlap controls true overlap-in-place decompression
+    \\(docs/format-spec.md §8b): the resident hunk and the scratch hunk
+    \\both still exist, but the still-compressed payload moves into the
+    \\resident hunk's own tail instead of the scratch hunk, which is
+    \\freed once decompression finishes exactly as in the default
+    \\layout - just much smaller now, since it no longer carries the
+    \\whole compressed payload. Every backend supports this.
+    \\--overlap=auto (the default) measures both layouts' real peak
+    \\memory footprint for this file and picks whichever is smaller -
+    \\small payloads, or backends like store that never actually shrink
+    \\the input, often keep using the default layout, since the overlap
+    \\layout's own alignment/margin overhead can outweigh its savings
+    \\there. --overlap=on forces it whenever the backend supports it
+    \\(falling back to the default layout with a warning otherwise);
+    \\--overlap=off always uses the
+    \\default layout.
     \\
     \\-v prints per-backend sizes (in --backend=auto mode) and image
     \\statistics as packing proceeds, not just the final result.
@@ -221,6 +238,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     var mem_override: ?bool = null; // true = force chip, false = force fast/any
     var verbose = false;
     var flash = false;
+    var overlap_mode: OverlapMode = .auto;
     var positional: std.ArrayList([]const u8) = .empty;
     for (args) |arg| {
         if (std.mem.startsWith(u8, arg, "--backend=")) {
@@ -235,6 +253,18 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
                 std.log.err("--mem must be 'chip' or 'fast', got '{s}'", .{v});
                 return error.InvalidArguments;
             }
+        } else if (std.mem.startsWith(u8, arg, "--overlap=")) {
+            const v = arg["--overlap=".len..];
+            if (std.mem.eql(u8, v, "on")) {
+                overlap_mode = .on;
+            } else if (std.mem.eql(u8, v, "off")) {
+                overlap_mode = .off;
+            } else if (std.mem.eql(u8, v, "auto")) {
+                overlap_mode = .auto;
+            } else {
+                std.log.err("--overlap must be 'on', 'off', or 'auto', got '{s}'", .{v});
+                return error.InvalidArguments;
+            }
         } else if (std.mem.eql(u8, arg, "-v")) {
             verbose = true;
         } else if (std.mem.eql(u8, arg, "--flash")) {
@@ -244,7 +274,7 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         }
     }
     if (positional.items.len != 2) {
-        std.log.err("usage: execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|zx0fast|salvadorfast|most|auto] [--mem=chip|fast] [-v] [--flash] <in> <out>", .{});
+        std.log.err("usage: execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|zx0fast|salvadorfast|most|auto] [--mem=chip|fast] [--overlap=on|off|auto] [-v] [--flash] <in> <out>", .{});
         return error.InvalidArguments;
     }
 
@@ -274,11 +304,11 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     const exe_bytes, const used_backend = if (std.mem.eql(u8, backend_name, "auto"))
-        try packBest(arena, image, &backend_names, verbose, flash)
+        try packBest(arena, image, &backend_names, verbose, flash, overlap_mode)
     else if (std.mem.eql(u8, backend_name, "most"))
-        try packBest(arena, image, &most_backend_names, verbose, flash)
+        try packBest(arena, image, &most_backend_names, verbose, flash, overlap_mode)
     else
-        .{ try packWithBackend(arena, image, backend_name, verbose, flash), backend_name };
+        .{ try packWithBackend(arena, image, backend_name, verbose, flash, overlap_mode), backend_name };
 
     try cwd.writeFile(io, .{ .sub_path = out_path, .data = exe_bytes });
 
@@ -287,16 +317,24 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     });
 }
 
+/// `--overlap`'s own three states (docs/format-spec.md §8's overlap
+/// runtime algorithm): `off` always uses today's disjoint two-hunk
+/// layout; `on` uses the overlap layout whenever the chosen backend has
+/// one, falling back to disjoint with a warning otherwise; `auto` (the
+/// default) picks whichever layout has the smaller peak memory
+/// footprint for this specific file, per backend.
+const OverlapMode = enum { on, off, auto };
+
 /// Tries every backend in `names` and returns the smallest resulting
 /// output, along with which backend produced it - Shrinkler's own "just
 /// try it" approach to backend selection (PROJECT_PLAN.md M3), backing
 /// both `--backend=most` (`most_backend_names`) and `--backend=auto`
 /// (`backend_names`).
-fn packBest(arena: std.mem.Allocator, image: flatten.FlatImage, names: []const []const u8, verbose: bool, flash: bool) !struct { []u8, []const u8 } {
+fn packBest(arena: std.mem.Allocator, image: flatten.FlatImage, names: []const []const u8, verbose: bool, flash: bool, overlap_mode: OverlapMode) !struct { []u8, []const u8 } {
     var best: ?[]u8 = null;
     var best_name: []const u8 = "";
     for (names) |name| {
-        const candidate = try packWithBackend(arena, image, name, verbose, flash);
+        const candidate = try packWithBackend(arena, image, name, verbose, flash, overlap_mode);
         if (best == null or candidate.len < best.?.len) {
             best = candidate;
             best_name = name;
@@ -313,59 +351,68 @@ const CompressedBackend = struct {
     /// see that command's own comment on why it's threaded through here
     /// rather than re-derived from `stub_bytes` by identity.
     stub_listing: []const u8,
+    /// Minimum safety_margin this compressed payload needs for the
+    /// overlap layout (musashi_bench.measureOverlapMargin,
+    /// docs/format-spec.md §8b) - every backend supports this today
+    /// (every stub shares the same `stubs/common/runtime.i`, which
+    /// branches on FLAG_OVERLAP entirely at runtime, so there's no
+    /// separate overlap stub to track here), so this is only ever null
+    /// if a future backend's stub genuinely can't support it for some
+    /// backend-specific reason.
+    overlap_margin: ?u32,
 };
 
 fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool) !CompressedBackend {
-    const payload, const backend_id, const stub_bytes, const stub_listing = if (std.mem.eql(u8, backend_name, "store"))
-        .{ try store.compress(arena, image), container.BackendId.store, stub_store, listing_store }
+    const payload, const backend_id, const stub_bytes, const stub_listing, const supports_overlap = if (std.mem.eql(u8, backend_name, "store"))
+        .{ try store.compress(arena, image), container.BackendId.store, stub_store, listing_store, true }
     else if (std.mem.eql(u8, backend_name, "inflate"))
-        .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
+        .{ try inflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "zultra"))
         // zultra is a different host-side compressor producing the same
         // raw-DEFLATE format as "inflate" - same backend_id, same stub,
         // see src/backends/zultra_vendor/README.md.
-        .{ try zultra.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
+        .{ try zultra.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "libdeflate"))
         // libdeflate is another host-side compressor producing the
         // same raw-DEFLATE format as "inflate"/"zultra" - same
         // backend_id, same stub, see
         // src/backends/libdeflate_vendor/README.md.
-        .{ try libdeflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
+        .{ try libdeflate.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "zopfli"))
         // zopfli is another host-side compressor producing the same
         // raw-DEFLATE format as "inflate"/"zultra"/"libdeflate" - same
         // backend_id, same stub, see
         // src/backends/zopfli_vendor/README.md.
-        .{ try zopfli.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate }
+        .{ try zopfli.compress(arena, image), container.BackendId.inflate, stub_inflate, listing_inflate, true }
     else if (std.mem.eql(u8, backend_name, "zx0"))
-        .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0 }
+        .{ try zx0.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0, true }
     else if (std.mem.eql(u8, backend_name, "salvador"))
         // salvador is a different host-side ZX0 compressor producing the
         // same format as "zx0" - same backend_id, same stub, see
         // src/backends/salvador_vendor/README.md.
-        .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0 }
+        .{ try salvador.compress(arena, image), container.BackendId.zx0, stub_zx0, listing_zx0, true }
     else if (std.mem.eql(u8, backend_name, "zx0fast"))
         // zx0fast/salvadorfast reuse zx0's/salvador's exact host
         // encoders (identical payload format/bytes) but embed Chris
         // Hodges (Platon42)'s faster-decompressing depacker stub - own
         // backend_id, see src/container.zig's BackendId doc comment
         // and stubs/zx0/README.md.
-        .{ try zx0.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, listing_zx0fast }
+        .{ try zx0.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, listing_zx0fast, true }
     else if (std.mem.eql(u8, backend_name, "salvadorfast"))
-        .{ try salvador.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, listing_zx0fast }
+        .{ try salvador.compress(arena, image), container.BackendId.zx0_fast, stub_zx0fast, listing_zx0fast, true }
     else if (std.mem.eql(u8, backend_name, "shrinkler"))
-        .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, listing_shrinkler }
+        .{ try shrinkler.compress(arena, image), container.BackendId.shrinkler, stub_shrinkler, listing_shrinkler, true }
     else if (std.mem.eql(u8, backend_name, "lz4small"))
         // lz4small/lz4normal/lz4fast share one host-side LZ4HC
         // compressor (identical payload bytes) but each embeds a
         // genuinely different depacker stub - own backend_id per
         // variant, see src/container.zig's BackendId doc comment and
         // stubs/lz4/README.md.
-        .{ try lz4.compress(arena, image), container.BackendId.lz4_small, stub_lz4small, listing_lz4small }
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_small, stub_lz4small, listing_lz4small, true }
     else if (std.mem.eql(u8, backend_name, "lz4normal"))
-        .{ try lz4.compress(arena, image), container.BackendId.lz4_normal, stub_lz4normal, listing_lz4normal }
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_normal, stub_lz4normal, listing_lz4normal, true }
     else if (std.mem.eql(u8, backend_name, "lz4fast"))
-        .{ try lz4.compress(arena, image), container.BackendId.lz4_fast, stub_lz4fast, listing_lz4fast }
+        .{ try lz4.compress(arena, image), container.BackendId.lz4_fast, stub_lz4fast, listing_lz4fast, true }
     else {
         std.log.err("backend '{s}' isn't implemented yet - only 'store'/'inflate'/'zultra'/'libdeflate'/'zopfli'/'zx0'/'salvador'/'shrinkler'/'lz4small'/'lz4normal'/'lz4fast'/'zx0fast'/'salvadorfast'/'most'/'auto' exist so far", .{backend_name});
         return error.UnsupportedBackend;
@@ -392,7 +439,28 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
         std.log.info("  {s}: {d} -> {d} bytes (self-check OK)", .{ backend_name, expected.len, payload.len });
     }
 
-    return .{ .payload = payload, .backend_id = backend_id, .stub_bytes = stub_bytes, .stub_listing = stub_listing };
+    // Overlap-margin measurement (docs/format-spec.md §8b): runs
+    // unconditionally whenever this backend supports the overlap layout,
+    // regardless of --overlap mode - cheap (already proven fast enough
+    // for `execram bench`'s own per-backend timing), and keeps this
+    // function free of --overlap-aware branching; that decision belongs
+    // entirely to packWithBackend.
+    const overlap_margin: ?u32 = if (supports_overlap) blk: {
+        const depack_offset = try musashi_bench.parseDepackOffset(stub_listing);
+        const margin = try musashi_bench.measureOverlapMargin(stub_bytes, depack_offset, payload, @intCast(payload.len), @intCast(expected.len));
+        if (verbose) {
+            std.log.info("  {s}: overlap safety_margin = {d} bytes", .{ backend_name, margin });
+        }
+        break :blk margin;
+    } else null;
+
+    return .{
+        .payload = payload,
+        .backend_id = backend_id,
+        .stub_bytes = stub_bytes,
+        .stub_listing = stub_listing,
+        .overlap_margin = overlap_margin,
+    };
 }
 
 /// Hunk 0's own declared/allocated size (src/container.zig's
@@ -412,14 +480,57 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
 /// up to a longword: unlike AllocMem's own byte-granular size argument,
 /// a HUNK_HEADER size-table entry is a count of longwords.
 fn hunk0Size(image: flatten.FlatImage) u32 {
-    const tail = @max(image.bss_size, @as(u32, @intCast(image.reloc_stream.len)));
-    return @intCast(std.mem.alignForward(usize, image.code_data.len + tail, 4));
+    return container.residentTailSize(image.code_data.len, image.bss_size, image.reloc_stream.len);
 }
 
-fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash: bool) ![]u8 {
+fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash: bool, overlap_mode: OverlapMode) ![]u8 {
     const compressed = try compressWithBackend(arena, image, backend_name, verbose);
-    const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, flash);
-    return container.writeHunkExecutable(arena, stub_trampoline, container_bytes, hunk0Size(image), image.mem_chip);
+    const resident_tail = hunk0Size(image);
+    // Overlap-mode hunk 1 (docs/format-spec.md §8b): stub_bytes ++
+    // header only, no payload this time (buildContainer omits it
+    // whenever it's given a margin) - still resident alongside hunk 0
+    // for the duration of decompression, same as the disjoint layout's
+    // own hunk 1, just far smaller since it no longer carries the whole
+    // compressed payload.
+    const overlap_hunk1_size: u32 = @intCast(std.mem.alignForward(usize, compressed.stub_bytes.len + container.HEADER_SIZE, 4));
+
+    const use_overlap = switch (overlap_mode) {
+        .off => false,
+        .on => blk: {
+            if (compressed.overlap_margin == null) {
+                std.log.warn("--overlap=on requested but backend '{s}' doesn't support the overlap layout yet - falling back to the disjoint two-hunk layout", .{backend_name});
+                break :blk false;
+            }
+            break :blk true;
+        },
+        .auto => blk: {
+            const margin = compressed.overlap_margin orelse break :blk false;
+            // Disjoint's real peak: hunk 0 (the resident image) and hunk 1
+            // (stub+header+payload) are both resident simultaneously
+            // during decompression (docs/memory-lifecycle.md).
+            const disjoint_hunk1_size: u32 = @intCast(std.mem.alignForward(usize, compressed.stub_bytes.len + container.HEADER_SIZE + compressed.payload.len, 4));
+            const disjoint_peak = resident_tail + disjoint_hunk1_size;
+            const overlap_allocated = container.overlapAllocatedSize(stub_trampoline.len, @intCast(compressed.payload.len), margin, resident_tail);
+            const overlap_peak = overlap_allocated + overlap_hunk1_size;
+            if (verbose) {
+                std.log.info("  {s}: overlap auto - disjoint peak {d} bytes vs overlap peak {d} bytes -> {s}", .{
+                    backend_name, disjoint_peak, overlap_peak, if (overlap_peak < disjoint_peak) "overlap" else "disjoint",
+                });
+            }
+            break :blk overlap_peak < disjoint_peak;
+        },
+    };
+
+    if (use_overlap) {
+        const margin = compressed.overlap_margin.?;
+        const allocated_size = container.overlapAllocatedSize(stub_trampoline.len, @intCast(compressed.payload.len), margin, resident_tail);
+        const payload_offset = allocated_size - @as(u32, @intCast(std.mem.alignForward(usize, compressed.payload.len, 4)));
+        const hunk0_body = try container.buildOverlapHunk0Body(arena, stub_trampoline, compressed.payload, payload_offset);
+        const hunk1_body = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, flash, margin, @intCast(stub_trampoline.len));
+        return container.writeHunkExecutable(arena, hunk0_body, hunk1_body, allocated_size, image.mem_chip);
+    }
+    const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, flash, null, @intCast(stub_trampoline.len));
+    return container.writeHunkExecutable(arena, stub_trampoline, container_bytes, resident_tail, image.mem_chip);
 }
 
 /// Mirrors packWithBackend's own dispatch, one function per backend
@@ -468,7 +579,10 @@ fn cmdInfo(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     // as a literal prefix to reliably locate the header (see that
     // file's own module doc for why not to scan for the magic bytes
     // directly). stub_example is never produced by `pack`, so it's not
-    // listed here.
+    // listed here. One entry serves both layouts for a given backend
+    // (docs/format-spec.md §8b): runtime.i itself branches on
+    // FLAG_OVERLAP, so the disjoint and overlap containers embed the
+    // exact same stub bytes.
     const known_stubs = [_]info.KnownStub{
         .{ .stub_name = "store", .bytes = stub_store },
         .{ .stub_name = "inflate/zultra/libdeflate/zopfli", .bytes = stub_inflate },
@@ -571,7 +685,7 @@ fn cmdBench(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
         // bypassing `Start:` (where FLAG_FLASH's own code lives)
         // entirely, so it could never affect anything this table
         // measures.
-        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, false);
+        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, false, null, @intCast(stub_trampoline.len));
         const exe_bytes = try container.writeHunkExecutable(arena, stub_trampoline, container_bytes, hunk0Size(image), image.mem_chip);
         const ratio = @as(f64, @floatFromInt(exe_bytes.len)) / @as(f64, @floatFromInt(input_bytes.len)) * 100.0;
 
@@ -611,6 +725,89 @@ fn printUsage(io: Io) !void {
 test "example stub assembled correctly" {
     // stubs/example/hello.s is: moveq #42,d0 ; rts -> 70 2a 4e 75
     try std.testing.expectEqualSlices(u8, &.{ 0x70, 0x2a, 0x4e, 0x75 }, stub_example);
+}
+
+/// Overlap-margin sanity check against adversarial input (docs/format-
+/// spec.md §10: "each backend's algorithm-notes entry should derive
+/// [a margin] when ready" - measureOverlapMargin's own doc comment
+/// flags incompressible data as one of the "usual suspects" worth
+/// testing against, since it stresses the read/write gap harder than
+/// typical compressible data does). A deterministic non-repeating byte
+/// sequence, same idea as tests/corpus/gen_corpus.py's own
+/// "incompressible" generator, reimplemented directly in Zig so this
+/// runs as a fast host-side test with no FS-UAE/Python dependency.
+fn incompressibleFlatImage(allocator: std.mem.Allocator, len: usize) !flatten.FlatImage {
+    const code_data = try allocator.alloc(u8, len);
+    var x: u32 = 0x2545F491; // arbitrary nonzero xorshift32 seed
+    for (code_data) |*b| {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        b.* = @truncate(x);
+    }
+    return .{
+        .allocator = allocator,
+        .code_data = code_data,
+        .bss_size = 16,
+        .reloc_stream = try allocator.dupe(u8, &.{0xFE}), // no sites, just the terminator
+        .mem_chip = false,
+    };
+}
+
+test "overlap margin stays bounded on incompressible input (store, zx0)" {
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Small enough that zx0's optimal-parse compressor stays fast (real
+    // corpus files take minutes - docs/main.zig's own usage text on
+    // `bench`), large enough to exercise a real read/write gap.
+    const image = try incompressibleFlatImage(arena, 4096);
+
+    for ([_][]const u8{ "store", "zx0" }) |backend_name| {
+        const compressed = try compressWithBackend(arena, image, backend_name, false);
+        try std.testing.expect(compressed.overlap_margin != null);
+        const margin = compressed.overlap_margin.?;
+        // No formal upper bound is proven (that's exactly the open item
+        // this test exists to eventually help close), but a margin
+        // anywhere near the payload's own size would indicate something
+        // has gone very wrong (e.g. tracking the wrong region) rather
+        // than genuine backend behavior - both store and zx0 read/write
+        // in small, bounded steps per docs/algorithm-notes/.
+        try std.testing.expect(margin < compressed.payload.len);
+
+        const resident_tail = hunk0Size(image);
+        const allocated_size = container.overlapAllocatedSize(stub_trampoline.len, @intCast(compressed.payload.len), margin, resident_tail);
+        try std.testing.expect(allocated_size >= stub_trampoline.len + compressed.payload.len);
+        try std.testing.expect(allocated_size >= resident_tail);
+        try std.testing.expect(allocated_size >= @as(u32, margin) + compressed.payload.len);
+
+        const packed_bytes = try packWithBackend(arena, image, backend_name, false, false, .on);
+        try std.testing.expect(packed_bytes.len > 0);
+    }
+}
+
+test "every backend supports the overlap layout" {
+    // docs/format-spec.md §10: overlap support is universal now
+    // (stubs/common/runtime.i's FLAG_OVERLAP branch is shared
+    // unconditionally by every stub) - regression test that
+    // compressWithBackend actually measures a margin for each one,
+    // not just store/zx0 (the two originally-scoped backends already
+    // covered by the more detailed test above). A small image keeps
+    // even the optimal-parse backends (zx0/salvador) fast here.
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const image = try incompressibleFlatImage(arena, 512);
+
+    for (backend_names) |backend_name| {
+        const compressed = try compressWithBackend(arena, image, backend_name, false);
+        try std.testing.expect(compressed.overlap_margin != null);
+
+        const packed_bytes = try packWithBackend(arena, image, backend_name, false, false, .on);
+        try std.testing.expect(packed_bytes.len > 0);
+    }
 }
 
 test {

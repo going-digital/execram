@@ -141,19 +141,24 @@ not carried as dead weight for the rest of the process's life. This
 wasn't always true (see "History") and matches what Shrinkler's own
 default decrunch header already does (see "Comparison" below).
 
-## Not true in-place decompression
+## Not true in-place decompression (the default layout)
 
-Hunk 1 (still holding the compressed payload, until step 6 frees it) and
-`final` (hunk 0) are always two disjoint memory regions - `Depack` reads
-from one and writes to the other, never the same address twice for
-different reasons. This is *not* the same thing as Shrinkler's own
-`OverlapHeader.S`-style overlapping decompression, where the compressed
-and decompressed data share the very same bytes and a backend-specific
-worst-case expansion bound has to prove that's always safe.
-`safety_margin` (`docs/format-spec.md` §3) stays reserved and pinned to 0
-for exactly this reason - the current design doesn't need it, because it
-never overlaps anything. `docs/format-spec.md` §10 tracks true
-overlap-in-place decompression as a separate, still-open item.
+This page's phase-by-phase account above is all true of `execram pack`'s
+**default** layout: hunk 1 (still holding the compressed payload, until
+step 6 frees it) and `final` (hunk 0) are always two disjoint memory
+regions - `Depack` reads from one and writes to the other, never the same
+address twice for different reasons. This is *not* the same thing as
+Shrinkler's own `OverlapHeader.S`-style overlapping decompression, where
+the compressed and decompressed data share the very same bytes and a
+backend-specific worst-case expansion bound has to prove that's always
+safe. `safety_margin` (`docs/format-spec.md` §3) stays 0 and `flags` bit
+3 stays clear for exactly this reason whenever this layout is in use - it
+doesn't need a margin, because it never overlaps anything.
+
+execram now also has an opt-in layout that *does* overlap -
+`--overlap=on|auto`, `FLAG_OVERLAP`, `docs/format-spec.md` §8b - covered
+in its own row in the Comparison table below, right alongside the
+Shrinkler `--overlap` row it was always modeled on.
 
 ## History: from one loaded hunk that's never freed, to two hunks and one `FreeMem` call
 
@@ -250,9 +255,9 @@ Three build-time modes, three different outcomes for that one extra hunk:
   data) is never freed - `MiniHeader.S` contains no `FreeMem` call at
   all. This mode ends up in the situation execram's *old*, single-hunk
   design was in, not its current one.
-- **`--overlap`**: true in-place decompression, and the mode execram's
-  own `safety_margin` field (`docs/format-spec.md` §3, §10) still
-  gestures at without implementing. No shared scratch hunk exists at
+- **`--overlap`**: true in-place decompression - the mode execram's own
+  `safety_margin` field (`docs/format-spec.md` §3, §8b) now implements
+  for every backend (below). No shared scratch hunk exists at
   all - at pack time, `HunkFile.h`'s `verify()` actually *runs* the
   decompression for each hunk and measures the worst-case gap between
   its read and write pointers (`front_overlap_margin`), a proven number
@@ -265,24 +270,64 @@ Three build-time modes, three different outcomes for that one extra hunk:
   `OverlapHeader`'s own tiny entry stub (no bulk data in it at all,
   since every real hunk now carries its own) - never freed either, but
   a few hundred bytes of decrunch code, not a whole compressed payload.
-  This remains strictly better than execram's own current design (no
-  scratch hunk needed at all, however briefly) - the still-open item
-  `docs/format-spec.md` §10 tracks.
+
+execram's own `--overlap` mode (`docs/format-spec.md` §8b) takes a
+noticeably different shape from Shrinkler's own `--overlap` at the
+mechanism level, even though the underlying idea (compressed and
+decompressed data sharing a buffer, a proven-not-assumed margin
+separating them) is the same: Shrinkler adds one genuinely new hunk (its
+tiny `OverlapHeader` entry stub) on top of N real per-original hunks,
+each of which then decompresses *itself* in place. execram instead keeps
+its *existing* two-hunk shape (`docs/format-spec.md` §2) unchanged -
+hunk 0 the resident image, hunk 1 the depacker stub + header, still freed
+after use exactly as the default layout already does - and just moves
+*where the compressed payload physically sits*: into hunk 0's own
+on-disk body, at a computed tail offset, instead of trailing hunk 1.
+Hunk 1's own code is never at risk from `Depack`'s output (which only
+ever touches hunk 0), so there's no analogue of Shrinkler's
+never-freed entry stub here at all - execram's overlap layout frees
+*everything* scratch, same as its default layout, gaining only the
+compressed payload's own hunk-1 footprint back (a much smaller hunk 1,
+not a whole extra hunk).
+
+`src/musashi_bench.zig`'s `measureOverlapMargin` plays `verify()`'s own
+role - it actually runs the depacker under real 68k emulation and
+measures the true worst-case read/write gap for the specific file being
+packed, the same "proven for this input, not a generic bound" approach,
+run inside `compressWithBackend` for every backend that supports the
+overlap layout. `execram pack --overlap=auto` (the default) then picks
+disjoint or overlap per file by comparing both layouts' real peak memory
+footprint (hunk 0 + hunk 1, both resident simultaneously in either
+layout), rather than Shrinkler's own build-time mode selection. No
+runtime "move the payload to where it needs to be" step exists at all -
+unlike Shrinkler's own per-hunk memmove, execram's payload already lands
+at the right on-disk offset the moment `LoadSeg` loads hunk 0, since the
+host tool (`src/container.zig`'s `buildOverlapHunk0Body`) places it there
+directly when writing the file.
 
 | | Extra scratch beyond the resident program | Ever freed? | Steady-state dead weight |
 |---|---|---|---|
-| execram (current) | one hunk (stub+header+compressed payload) | **yes** - the one `FreeMem` call in the runtime | none |
+| execram (current, default) | one hunk (stub+header+compressed payload) | **yes** - the one `FreeMem` call in the runtime | none |
+| execram `--overlap` (opt-in, every backend) | one much smaller hunk (stub+header only - the payload moved into hunk 0 itself) | **yes** - the same `FreeMem` call, now freeing far less | none |
 | execram (old, single-hunk) | the whole loaded hunk (stub+header+compressed payload) | never | full compressed file size, forever |
 | Shrinkler default | one extra hunk (decrunch code + whole combined bitstream) | **yes** - the one `FreeMem` call in Shrinkler's codebase | none |
 | Shrinkler `--mini` | one extra hunk (decrunch code + compressed data) | never | full compressed data size, forever |
 | Shrinkler `--overlap` | none (each hunk carries its own compressed tail) | n/a - no scratch hunk holds bulk data | a few hundred bytes (the entry stub only) |
 
+Unlike Shrinkler's own `--overlap` (whose `OverlapHeader` entry stub is
+never freed at all), execram's overlap layout frees hunk 1 in full,
+matching its own default layout's mechanism exactly - `--mem=chip` still
+only ever affects hunk 0 (§5's own note), never hunk 1, in either layout.
+
 Worth flagging, found while reading this code rather than something this
 page can resolve on its own: Shrinkler's default and `--overlap` modes
 both call `CacheClearU` before jumping into freshly-decompressed code,
-skipped only on plain 68000s. execram's runtime never does this. Whether
-that's a real gap on 68020+ real hardware (as opposed to moot, if freshly
-allocated memory is never already sitting in an instruction cache to
-begin with) hasn't been investigated - noted here rather than in
+skipped only on plain 68000s. execram's runtime never does this - its
+own `FLAG_OVERLAP` branch (`stubs/common/runtime.i`) included, this gap
+applies identically to execram's own `--overlap` mode, not just its
+default layout. Whether that's a real
+gap on 68020+ real hardware (as opposed to moot, if freshly allocated
+memory is never already sitting in an instruction cache to begin with)
+hasn't been investigated - noted here rather than in
 `docs/format-spec.md` §10 since it's a runtime-correctness question, not
 a format one.

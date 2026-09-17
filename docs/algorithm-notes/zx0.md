@@ -68,3 +68,38 @@ payload either way - see `stubs/zx0/README.md` for the full numbers
 and the one real trade-off worth knowing (narrower, 16-bit internal
 accumulators cap any single literal-run/match length at 65535, a
 constraint `unzx0_68000.s` doesn't have).
+
+## Overlap-mode margin
+
+`zx0`/`salvador` support the overlap layout (`docs/format-spec.md` §8b) -
+`unzx0_68000.s`'s own `Depack:` is completely unchanged; the same one
+routine serves both layouts, since `stubs/common/runtime.i`'s `Start:`
+branches on `FLAG_OVERLAP` only in how it locates `Depack`'s own input,
+not in which stub gets assembled (confirmed by direct inspection before
+this design was written: every read of the compressed input is strictly
+forward, post-increment only, via A0 - no lookahead or backward re-read
+anywhere; back-references only ever read from the *output*, via A1/A2, a
+separate, non-overlapping concern).
+
+Unlike `store` (`docs/algorithm-notes/store.md`'s own section), ZX0's
+margin is genuinely **data-dependent**, not near-zero: a long literal
+run or a match copying many output bytes per compressed byte consumed
+can let the write pointer race ahead of what's actually been read from
+the compressed stream, before the next match's own back-reference "pays
+back" some of that ratio. There is no fixed constant that's provably
+safe for every input - `execram pack --backend=zx0|salvador --overlap=on`
+always measures the real margin for the specific file being packed
+(`src/musashi_bench.zig`'s `measureOverlapMargin`, `docs/format-spec.md`
+§8b), the same per-file "proven for this input" approach Shrinkler's own
+`--overlap` mode uses (`docs/memory-lifecycle.md`'s Comparison section),
+not a generic theoretical bound. Incompressible input (long literal runs,
+few or no matches) is the adversarial case worth testing against - see
+`src/main.zig`'s own `"overlap margin stays bounded on incompressible
+input"` test.
+
+Applies identically to `unzx0_68000_fast.s` (`zx0fast`/`salvadorfast`) -
+same fundamental forward-read, no-lookahead structure, just fewer
+branches - whenever `src/main.zig`'s `compressWithBackend` starts
+measuring a margin for it too; no stub or runtime change is needed to
+extend `--overlap` there, only that one wiring decision (PROJECT_PLAN.md
+scope for this pass; see `docs/format-spec.md` §10).

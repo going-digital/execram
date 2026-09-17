@@ -31,11 +31,12 @@ pub const KnownStub = struct {
 const FLAG_MEM_CHIP: u8 = 1;
 const FLAG_HAS_RELOCS: u8 = 2;
 const FLAG_FLASH: u8 = 4;
+const FLAG_OVERLAP: u8 = 8;
 const MAGIC: u32 = 0x45784372; // "ExCr"
 const HEADER_SIZE: usize = 32;
 
 pub const InfoError = error{
-    NotATwoHunkCodeFile,
+    NotARecognizedHunkLayout,
     UnrecognizedStub,
     TruncatedHeader,
     BadMagic,
@@ -70,6 +71,9 @@ pub const Header = struct {
     }
     pub fn hasFlash(self: Header) bool {
         return self.flags & FLAG_FLASH != 0;
+    }
+    pub fn isOverlap(self: Header) bool {
+        return self.flags & FLAG_OVERLAP != 0;
     }
     /// Bytes a backend's decompressor must produce from `compressed_size`
     /// bytes of payload (docs/format-spec.md §6: code+data, then the
@@ -136,19 +140,24 @@ pub fn printInfo(
     var file = try hunk.parse(allocator, exe_bytes);
     defer file.deinit();
 
-    // docs/format-spec.md §2 / docs/memory-lifecycle.md: hunk 0 is the
-    // trampoline (declared at the full resident size, tiny real body -
-    // nothing `info` needs to read there), hunk 1 holds the actual
-    // stub+header+payload container this function reports on.
-    if (file.hunks.len != 2 or file.hunks[0].kind != .code or file.hunks[1].kind != .code) {
-        return error.NotATwoHunkCodeFile;
+    // docs/format-spec.md §2 / docs/memory-lifecycle.md: the default
+    // disjoint layout is two hunks (hunk 0 the trampoline, tiny real body
+    // - nothing `info` needs to read there - hunk 1 the actual
+    // stub+header+payload container); the overlap layout
+    // (docs/format-spec.md §8's overlap algorithm) is a single hunk
+    // holding that same container directly. Either way, the container
+    // this function reports on is always the *last* hunk.
+    if (file.hunks.len == 0 or file.hunks.len > 2) return error.NotARecognizedHunkLayout;
+    for (file.hunks) |h| {
+        if (h.kind != .code) return error.NotARecognizedHunkLayout;
     }
-    const container_data = file.hunks[1].data;
+    const container_data = file.hunks[file.hunks.len - 1].data;
     const header = try locateHeader(container_data, known_stubs);
 
     const mem_chip = header.memChip();
     const has_relocs = header.hasRelocs();
     const has_flash = header.hasFlash();
+    const is_overlap = header.isOverlap();
     const uncompressed_size = header.uncompressedSize();
     const resident_size = header.residentSize();
 
@@ -156,6 +165,9 @@ pub fn printInfo(
         header.version_major, header.version_minor, header.stub.stub_name, header.stub.bytes.len,
     });
     try w.print("  backend_id:          {d} ({s})\n", .{ header.backend_id, backendIdName(header.backend_id) });
+    try w.print("  layout:              {s} ({d} hunk{s})\n", .{
+        if (is_overlap) "overlap" else "disjoint", file.hunks.len, if (file.hunks.len == 1) "" else "s",
+    });
     try w.print("  memory:              {s}\n", .{if (mem_chip) "chip" else "any/fast"});
     try w.print("  relocations:         {s}\n", .{if (has_relocs) "yes" else "none"});
     try w.print("  border flash:        {s}\n", .{if (has_flash) "yes" else "no"});
@@ -204,7 +216,7 @@ test "printInfo reports a real container's fields" {
 
     const stub = "FAKESTUB"; // 8 bytes, arbitrary - not a real assembled stub
     const payload = "COMPRESSEDPAYLOAD!!"; // 19 bytes, arbitrary
-    const container_bytes = try container.buildContainer(allocator, image, .zx0, stub, payload, false);
+    const container_bytes = try container.buildContainer(allocator, image, .zx0, stub, payload, false, null, "FAKETRAMPOLINE!!".len);
     defer allocator.free(container_bytes);
     const resident_size = @as(u32, @intCast(image.code_data.len)) + image.bss_size;
     const exe_bytes = try container.writeHunkExecutable(allocator, "FAKETRAMPOLINE!!", container_bytes, resident_size, image.mem_chip);
@@ -219,6 +231,7 @@ test "printInfo reports a real container's fields" {
     const report = out.written();
     try std.testing.expect(std.mem.indexOf(u8, report, "stub \"fake\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "backend_id:          2 (zx0-compatible (zx0 or salvador))") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "layout:              disjoint (2 hunks)") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "memory:              chip") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "relocations:         yes") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "border flash:        no") != null);
@@ -226,6 +239,47 @@ test "printInfo reports a real container's fields" {
     try std.testing.expect(std.mem.indexOf(u8, report, "bss size:            100 bytes") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "reloc stream size:   2 bytes") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "compressed size:     19 bytes") != null);
+}
+
+test "printInfo reports an overlap-layout container's two hunks" {
+    const allocator = std.testing.allocator;
+
+    var image = flatten.FlatImage{
+        .allocator = allocator,
+        .code_data = try allocator.dupe(u8, &.{ 1, 2, 3, 4, 5, 6, 7, 8 }),
+        .bss_size = 4,
+        .reloc_stream = try allocator.dupe(u8, &.{0xFE}), // no sites
+        .mem_chip = false,
+    };
+    defer image.deinit();
+
+    const stub = "FAKEOVERLAPSTUB!"; // 16 bytes, arbitrary
+    const payload = "COMPRESSEDPAYLOAD!!"; // 19 bytes, arbitrary
+    const trampoline = "TRAMP!!";
+    const margin: u32 = 4;
+    // Overlap layout: buildContainer omits the payload from hunk 1's own
+    // body whenever it's given a margin (docs/format-spec.md §8b) - the
+    // payload instead lives at a computed tail offset within hunk 0.
+    const hunk1_body = try container.buildContainer(allocator, image, .store, stub, payload, false, margin, trampoline.len);
+    defer allocator.free(hunk1_body);
+    const resident_tail = container.residentTailSize(image.code_data.len, image.bss_size, image.reloc_stream.len);
+    const allocated_size = container.overlapAllocatedSize(trampoline.len, @intCast(payload.len), margin, resident_tail);
+    const payload_offset = allocated_size - @as(u32, @intCast(std.mem.alignForward(usize, payload.len, 4)));
+    const hunk0_body = try container.buildOverlapHunk0Body(allocator, trampoline, payload, payload_offset);
+    defer allocator.free(hunk0_body);
+    const exe_bytes = try container.writeHunkExecutable(allocator, hunk0_body, hunk1_body, allocated_size, image.mem_chip);
+    defer allocator.free(exe_bytes);
+
+    const known_stubs = [_]KnownStub{.{ .stub_name = "fake-overlap", .bytes = stub }};
+
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    try printInfo(allocator, &out.writer, exe_bytes, &known_stubs);
+
+    const report = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, report, "stub \"fake-overlap\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "layout:              overlap (2 hunks)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "safety margin:       4 bytes") != null);
 }
 
 test "printInfo rejects a file with no recognized stub" {
