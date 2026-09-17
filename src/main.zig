@@ -219,6 +219,13 @@ const usage =
     \\depacker resident in Chip RAM, will be slower than this, not
     \\faster - treat these times as a best-case lower bound for
     \\comparing backends against each other, not a wall-clock guarantee.
+    \\The size/ratio column reflects pack's own --overlap=auto/
+    \\--flash=auto defaults, exactly like a plain `execram pack
+    \\--backend=<name>` invocation would - so it can be noticeably
+    \\larger than the backend's raw compressed-payload size whenever
+    \\--overlap=auto picks the overlap layout, which trades a larger
+    \\on-disk file for less peak RAM during decompression (see
+    \\docs/format-spec.md §8b/§8c).
     \\
     \\bench defaults to inflate/zultra/libdeflate/zopfli/salvador/
     \\salvadorfast/shrinkler/lz4small/lz4normal/lz4fast - store adds no
@@ -558,6 +565,18 @@ fn hunk0Size(image: flatten.FlatImage) u32 {
 
 fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash_mode: FlashMode, killtwitch: bool, overlap_mode: OverlapMode) ![]u8 {
     const compressed = try compressWithBackend(arena, image, backend_name, verbose);
+    return buildPackedExecutable(arena, image, backend_name, verbose, compressed, flash_mode, killtwitch, overlap_mode);
+}
+
+/// The --overlap/--flash decision and container/hunk assembly, factored
+/// out of `packWithBackend` so `cmdBench`'s own size/ratio column can go
+/// through the exact same logic - given a `CompressedBackend` it
+/// already has in hand (from its own Musashi timing pass) - without
+/// either hand-duplicating this decision (and risking it drifting out
+/// of sync with what a real `execram pack` invocation actually
+/// produces) or paying for a second, redundant `compressWithBackend`
+/// call just to get a size number.
+fn buildPackedExecutable(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, compressed: CompressedBackend, flash_mode: FlashMode, killtwitch: bool, overlap_mode: OverlapMode) ![]u8 {
     const resident_tail = hunk0Size(image);
 
     // --flash decision: every backend has its own flash-instrumented
@@ -777,13 +796,23 @@ fn cmdBench(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
             @intCast(expected.len),
         );
 
-        // flash=false, killtwitch=false: irrelevant to this command
-        // either way - musashi_bench.timeDepack above already ran the
-        // plain (non-flash) stub directly against `Depack:`, so which
-        // stub buildContainer embeds here has no bearing on anything
-        // this table measures.
-        const container_bytes = try container.buildContainer(arena, image, compressed.backend_id, compressed.stub_bytes, compressed.payload, false, false, null, @intCast(stub_trampoline.len));
-        const exe_bytes = try container.writeHunkExecutable(arena, stub_trampoline, container_bytes, hunk0Size(image), image.mem_chip);
+        // .auto/.auto/false: exactly `execram pack`'s own defaults - so
+        // this table's size/ratio column always matches what a plain
+        // `execram pack --backend=<name>` invocation actually produces,
+        // --overlap and --flash included, rather than only the raw
+        // disjoint/non-flash container size (which can be dramatically
+        // smaller than what --overlap=auto actually picks whenever the
+        // overlap layout's own on-disk zero-padding - materializing the
+        // safety_margin gap as literal bytes, unlike the disjoint
+        // layout's implicit hunk-size-vs-data-length allocation - grows
+        // the file well past its compressed payload size). Musashi's
+        // own timing above already ran the plain (non-flash) stub
+        // directly against `Depack:` regardless of what gets embedded
+        // here - a flash poke never touches the read/write pointers or
+        // register state RelocFixup/timing depend on - so which stub
+        // buildPackedExecutable ends up choosing has no bearing on the
+        // cycles/PAL time columns.
+        const exe_bytes = try buildPackedExecutable(arena, image, name, false, compressed, .auto, false, .auto);
         const ratio = @as(f64, @floatFromInt(exe_bytes.len)) / @as(f64, @floatFromInt(input_bytes.len)) * 100.0;
 
         const matches = std.mem.eql(u8, result.output, expected);
