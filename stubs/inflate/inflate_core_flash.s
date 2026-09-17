@@ -405,7 +405,7 @@ dh9:   move.l  d0,(a0)+
         ; with the AllocMem scratch pointer.
 flash_setup:
         btst    #4,d7            ; FLAG_KILLTWITCH
-        beq.s     flash_COLOR17
+        beq.s     flash_color17
         lea     $dff180,a3       ; COLOR00 (border/background)
         bra.s     flash_gotaddr
 flash_color17:

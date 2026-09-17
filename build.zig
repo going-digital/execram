@@ -8,82 +8,158 @@ const Stub = struct {
     name: []const u8,
     source: []const u8,
     /// Passed to vasm as `-I<dir>` when the stub `include`s shared code
-    /// (stubs/common/) - see stubs/store/stub.s.
+    /// (stubs/common/) - see stubs/store/stub.s. Every file `source`
+    /// (transitively) `include`s is discovered automatically from this
+    /// and `source`'s own directory - see `addTransitiveIncludeInputs`
+    /// below - so there is deliberately no manually-maintained include
+    /// list here to fall out of sync with the real `.s`/`.i`/`.asm`
+    /// files the way one already did once (see that function's own doc
+    /// comment for the incident this replaced).
     include_dir: ?[]const u8 = null,
-    /// Every other file `source` (transitively) `include`s/`.include`s,
-    /// listed explicitly so it can be registered as a cache input below -
-    /// see `addIncludedFileInputs`'s doc comment for why this exists.
-    extra_includes: []const []const u8 = &.{},
 };
 
-/// Registers `path` as a cache input on `run` via `addFileInput` (tracked
-/// for invalidation, but not added to argv - these files reach vasm
-/// through `-I`/relative `include`, not as direct arguments). Without
-/// this, Zig's build cache only hashes the top-level `.source` file
-/// passed via `addFileArg`; an edit to a shared file an `include`
-/// directive pulls in (stubs/common/runtime.i, etc.) is invisible to
-/// the cache key, so `zig build` silently keeps serving a stale
-/// assembled stub. Confirmed directly: editing runtime.i alone did not
-/// change stub_inflate's cached output until this was added.
-fn addIncludedFileInputs(b: *std.Build, run: *std.Build.Step.Run, paths: []const []const u8) void {
-    for (paths) |path| run.addFileInput(b.path(path));
+/// Discovers every file `source` (transitively) `include`s - by directly
+/// parsing `include "path"` directives out of `source` and each file it
+/// pulls in, recursively - and registers each one as a cache input on
+/// `run` via `addFileInput` (tracked for invalidation, but not added to
+/// argv - these files reach vasm through `-I`/relative `include`, not as
+/// direct arguments).
+///
+/// Without this, Zig's build cache only ever hashes the top-level
+/// `source` file passed via `addFileArg`; an edit to a shared file an
+/// `include` directive pulls in (stubs/common/runtime.i, etc.) is
+/// invisible to the cache key, so `zig build` silently keeps serving a
+/// stale assembled stub. This happened for real, twice: once during
+/// early development (editing runtime.i alone didn't change
+/// stub_inflate's cached output - fixed by a hand-maintained
+/// `extra_includes` list on `Stub`, this function's own predecessor),
+/// and again later when that hand-maintained list, despite being
+/// correct for every `Stub` entry at the time, turned out to have a
+/// sibling gap: `tools/bench/fake_exec.s`'s own `include
+/// "scratch_addr.i"` was never tracked at all, on a completely separate
+/// (non-`Stub`) assemble step that had no equivalent list to maintain in
+/// the first place. A hand-maintained list is exactly the kind of thing
+/// that's correct today and silently wrong the next time someone adds
+/// an `include` - discovering it directly from the source files
+/// themselves, every time, is the only way this can't happen again.
+///
+/// vasm itself has no dependency-file output (unlike a C compiler's
+/// `-MMD`/`-MF`) to lean on instead - confirmed directly, no such option
+/// exists in its own `-help` output.
+///
+/// Runs at `zig build` configuration time (this function does real
+/// filesystem reads against `b.build_root`, not part of the
+/// cross-compiled build graph itself - the same category of host-side
+/// work Zig's own build system does internally for things like glob
+/// matching), so its result always reflects whatever `include`
+/// directives are on disk right now, not a snapshot from whenever the
+/// list was last hand-edited.
+///
+/// Resolves each `include "X"` the same two places vasm itself would
+/// look, in the same order: first relative to the including file's own
+/// directory, then relative to `include_dir` (`-I`) if given and the
+/// first lookup missed.
+fn addTransitiveIncludeInputs(b: *std.Build, run: *std.Build.Step.Run, source: []const u8, include_dir: ?[]const u8) void {
+    var arena_state = std.heap.ArenaAllocator.init(b.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    var worklist: std.ArrayList([]const u8) = .empty;
+    worklist.append(arena, source) catch @panic("OOM");
+
+    while (worklist.pop()) |path| {
+        if (seen.contains(path)) continue;
+        seen.put(arena, path, {}) catch @panic("OOM");
+
+        const contents = b.build_root.handle.readFileAlloc(b.graph.io, path, arena, .limited(16 * 1024 * 1024)) catch |err| {
+            std.debug.panic("addTransitiveIncludeInputs: couldn't read '{s}' (included from the stub dependency graph rooted at '{s}'): {t}", .{ path, source, err });
+        };
+
+        const dir = std.fs.path.dirname(path) orelse ".";
+        var lines = std.mem.splitScalar(u8, contents, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trimStart(u8, line, " \t");
+            if (!std.mem.startsWith(u8, trimmed, "include")) continue;
+            const after_kw = trimmed["include".len..];
+            if (after_kw.len == 0 or (after_kw[0] != ' ' and after_kw[0] != '\t')) continue; // e.g. "includeme" is not this directive
+            const q1 = std.mem.indexOfScalar(u8, after_kw, '"') orelse continue;
+            const rest = after_kw[q1 + 1 ..];
+            const q2 = std.mem.indexOfScalar(u8, rest, '"') orelse continue;
+            const included = rest[0..q2];
+
+            const local_candidate = std.fs.path.join(arena, &.{ dir, included }) catch @panic("OOM");
+            const resolved = if (fileExists(b, local_candidate))
+                local_candidate
+            else if (include_dir) |idir|
+                std.fs.path.join(arena, &.{ idir, included }) catch @panic("OOM")
+            else
+                local_candidate; // neither exists - let vasm itself report the real "could not open" error at build time
+
+            worklist.append(arena, resolved) catch @panic("OOM");
+        }
+    }
+
+    var it = seen.keyIterator();
+    while (it.next()) |path| {
+        if (std.mem.eql(u8, path.*, source)) continue; // source itself is already an addFileArg, not a bare input
+        run.addFileInput(b.path(path.*));
+    }
+}
+
+fn fileExists(b: *std.Build, path: []const u8) bool {
+    b.build_root.handle.access(b.graph.io, path, .{}) catch return false;
+    return true;
 }
 
 const stubs = [_]Stub{
     .{ .name = "stub_example", .source = "stubs/example/hello.s" },
     // Hunk 0's own body for every backend alike (docs/memory-lifecycle.md's
     // "new default" - src/container.zig's writeHunkExecutable). No
-    // `include`s of its own, so no include_dir/extra_includes needed.
-    // The generated .lst listing goes unused (nothing needs
-    // stub_trampoline's own Depack offset), harmless.
+    // `include`s of its own, so no include_dir needed (and nothing for
+    // addTransitiveIncludeInputs to discover). The generated .lst
+    // listing goes unused (nothing needs stub_trampoline's own Depack
+    // offset), harmless.
     .{ .name = "stub_trampoline", .source = "stubs/common/trampoline.s" },
     .{
         .name = "stub_store",
         .source = "stubs/store/stub.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/store/depack_core.s" },
     },
     .{
         .name = "stub_inflate",
         .source = "stubs/inflate/stub.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/inflate/inflate_core.s" },
     },
     .{
         .name = "stub_zx0",
         .source = "stubs/zx0/stub.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000.s" },
     },
     .{
         .name = "stub_zx0fast",
         .source = "stubs/zx0/stub_fast.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000_fast.s" },
     },
     .{
         .name = "stub_shrinkler",
         .source = "stubs/shrinkler/stub.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/shrinkler/ShrinklerDecompress.s" },
     },
     .{
         .name = "stub_lz4small",
         .source = "stubs/lz4/stub_small.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_smallest.asm" },
     },
     .{
         .name = "stub_lz4normal",
         .source = "stubs/lz4/stub_normal.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_normal.asm" },
     },
     .{
         .name = "stub_lz4fast",
         .source = "stubs/lz4/stub_fast.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_fastest.asm" },
     },
     // Flash-instrumented variants (docs/format-spec.md's in-loop
     // decompression flicker) - a separately-assembled stub per backend
@@ -95,49 +171,41 @@ const stubs = [_]Stub{
         .name = "stub_store_flash",
         .source = "stubs/store/stub_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/store/depack_core_flash.s" },
     },
     .{
         .name = "stub_inflate_flash",
         .source = "stubs/inflate/stub_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/inflate/inflate_core_flash.s" },
     },
     .{
         .name = "stub_zx0_flash",
         .source = "stubs/zx0/stub_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000_flash.s" },
     },
     .{
         .name = "stub_zx0fast_flash",
         .source = "stubs/zx0/stub_fast_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/zx0/unzx0_68000_fast_flash.s" },
     },
     .{
         .name = "stub_shrinkler_flash",
         .source = "stubs/shrinkler/stub_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/shrinkler/ShrinklerDecompress_flash.s" },
     },
     .{
         .name = "stub_lz4small_flash",
         .source = "stubs/lz4/stub_small_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_smallest_flash.asm" },
     },
     .{
         .name = "stub_lz4normal_flash",
         .source = "stubs/lz4/stub_normal_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_normal_flash.asm" },
     },
     .{
         .name = "stub_lz4fast_flash",
         .source = "stubs/lz4/stub_fast_flash.s",
         .include_dir = "stubs/common",
-        .extra_includes = &.{ "stubs/common/runtime.i", "stubs/common/header.i", "stubs/lz4/lz4_fastest_flash.asm" },
     },
 };
 
@@ -509,6 +577,7 @@ pub fn build(b: *std.Build) void {
         "-no-opt",
         "-quiet",
     });
+    addTransitiveIncludeInputs(b, fake_exec_assemble, "tools/bench/fake_exec.s", null);
     fake_exec_assemble.addFileArg(b.path("tools/bench/fake_exec.s"));
     fake_exec_assemble.addArg("-o");
     const fake_exec_bin = fake_exec_assemble.addOutputFileArg("fake_exec.bin");
@@ -532,7 +601,7 @@ pub fn build(b: *std.Build) void {
         if (stub.include_dir) |dir| {
             assemble.addArg(b.fmt("-I{s}", .{dir}));
         }
-        addIncludedFileInputs(b, assemble, stub.extra_includes);
+        addTransitiveIncludeInputs(b, assemble, stub.source, stub.include_dir);
         assemble.addFileArg(b.path(stub.source));
         assemble.addArg("-o");
         const bin = assemble.addOutputFileArg(b.fmt("{s}.bin", .{stub.name}));
@@ -563,7 +632,7 @@ pub fn build(b: *std.Build) void {
         if (stub.include_dir) |dir| {
             assemble_listing.addArg(b.fmt("-I{s}", .{dir}));
         }
-        addIncludedFileInputs(b, assemble_listing, stub.extra_includes);
+        addTransitiveIncludeInputs(b, assemble_listing, stub.source, stub.include_dir);
         // vasm rejects a concatenated "-L<path>" (confirmed directly:
         // "error 15: unknown option") - unlike some other single-letter
         // flags, it needs "-L" and the path as two separate argv
@@ -592,6 +661,7 @@ pub fn build(b: *std.Build) void {
             "-no-opt",
             "-quiet",
         });
+        addTransitiveIncludeInputs(b, assemble, fixture.source, null);
         assemble.addFileArg(b.path(fixture.source));
         assemble.addArg("-o");
         const obj = assemble.addOutputFileArg(b.fmt("{s}.o", .{fixture.name}));
