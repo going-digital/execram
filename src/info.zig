@@ -144,19 +144,26 @@ pub fn printInfo(
     var file = try hunk.parse(allocator, exe_bytes);
     defer file.deinit();
 
-    // docs/format-spec.md §2 / docs/memory-lifecycle.md: the default
-    // disjoint layout is two hunks (hunk 0 the trampoline, tiny real body
-    // - nothing `info` needs to read there - hunk 1 the actual
-    // stub+header+payload container); the overlap layout
-    // (docs/format-spec.md §8's overlap algorithm) is a single hunk
-    // holding that same container directly. Either way, the container
-    // this function reports on is always the *last* hunk.
-    if (file.hunks.len == 0 or file.hunks.len > 2) return error.NotARecognizedHunkLayout;
-    for (file.hunks) |h| {
-        if (h.kind != .code) return error.NotARecognizedHunkLayout;
-    }
-    const container_data = file.hunks[file.hunks.len - 1].data;
+    if (file.hunks.len == 0) return error.NotARecognizedHunkLayout;
+    const container_data = file.hunks[if (file.hunks.len >= 2) 1 else 0].data;
     const header = try locateHeader(container_data, known_stubs);
+    if (header.version_major == 1) {
+        const mixed = @import("mixed_container.zig");
+        const offset = header.header_offset;
+        if (container_data.len < offset + mixed.HEADER_SIZE) return error.TruncatedHeader;
+        const count = std.mem.readInt(u32, container_data[offset + 36 ..][0..4], .big);
+        if (count == 0 or count > 3 or file.hunks.len != count + 1) return error.NotARecognizedHunkLayout;
+        if (container_data.len < offset + mixed.HEADER_SIZE + count * mixed.DESC_SIZE) return error.TruncatedHeader;
+        try w.print("execram container v1.0 (preserved memory classes)\n  backend: {s}\n", .{backendIdName(header.backend_id)});
+        for (0..count) |i| {
+            const resident = file.hunks[if (i == 0) 0 else i + 1];
+            const d = container_data[offset + mixed.HEADER_SIZE + i * mixed.DESC_SIZE ..][0..mixed.DESC_SIZE];
+            try w.print("  region {d}: {s}, {d} bytes allocated, {s}\n", .{ i, @tagName(resident.mem_attr), resident.allocationSize(), if (d[7] & FLAG_OVERLAP != 0) "overlap" else "disjoint" });
+        }
+        try w.print("  scratch allocation: {d} bytes\n  compressed size: {d} bytes\n  packed file size: {d} bytes\n", .{ file.hunks[1].allocationSize(), header.compressed_size, exe_bytes.len });
+        return;
+    }
+    if (file.hunks.len > 2) return error.NotARecognizedHunkLayout;
 
     const mem_chip = header.memChip();
     const has_relocs = header.hasRelocs();

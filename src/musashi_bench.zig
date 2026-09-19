@@ -376,3 +376,63 @@ pub fn measureOverlapMargin(
 
     return .{ .margin = @intCast(overlap_required_margin), .cycles = run.cycles };
 }
+
+/// Test harness for the whole LoadSeg runtime, including relocation and
+/// scratch detachment. Non-contiguous allocations expose accidental
+/// assumptions that the resident regions share one base address.
+pub const LoadedHunk = struct { base: u32, bytes: []u8, next: u32 };
+pub fn runExecutable(a: std.mem.Allocator, exe: []const u8) ![]LoadedHunk {
+    const hunk = @import("hunk.zig");
+    var file = try hunk.parse(a, exe);
+    defer file.deinit();
+    const loaded = try a.alloc(LoadedHunk, file.hunks.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (loaded[0..initialized]) |h| a.free(h.bytes);
+        a.free(loaded);
+    }
+    @memset(&mem, 0xA5);
+    overlap_tracking = false;
+    var address: u32 = 0x10000;
+    for (file.hunks, 0..) |h, i| {
+        loaded[i] = .{ .base = address, .bytes = try a.alloc(u8, h.allocationSize()), .next = 0 };
+        initialized += 1;
+        address = std.mem.alignForward(u32, address + h.allocationSize() + 4096, 4);
+        if (address >= FAKE_EXEC_CODE_BASE - 32768) return error.PackedFileTooLargeForBenchMemory;
+    }
+    for (file.hunks, 0..) |h, i| {
+        const base = loaded[i].base;
+        @memcpy(mem[base..][0..h.data.len], h.data);
+        m68k_write_memory_32(base - 8, h.allocationSize() + 8);
+        m68k_write_memory_32(base - 4, if (i + 1 < loaded.len) (loaded[i + 1].base - 4) / 4 else 0);
+    }
+    @memcpy(mem[FAKE_EXEC_CODE_BASE..][0..fake_exec.len], fake_exec);
+    m68k_write_memory_32(4, FAKE_EXEC_CODE_BASE + EXEC_FREEMEM_LVO);
+    c.m68k_init();
+    c.m68k_set_cpu_type(c.M68K_CPU_TYPE_68000);
+    c.m68k_pulse_reset();
+    c.m68k_set_reg(c.M68K_REG_SP, address + 16384);
+    c.m68k_set_reg(c.M68K_REG_PC, loaded[0].base);
+    _ = c.m68k_execute(0);
+    _ = c.m68k_execute(1); // leave the trampoline before waiting for entry
+    var steps: usize = 0;
+    while (c.m68k_get_reg(null, c.M68K_REG_PC) != loaded[0].base) {
+        const pc = c.m68k_get_reg(null, c.M68K_REG_PC);
+        if (steps > 1000000 or (pc < loaded[0].base and pc < FAKE_EXEC_CODE_BASE)) {
+            return error.RuntimeDidNotReachEntry;
+        }
+        _ = c.m68k_execute(1);
+        steps += 1;
+    }
+    for (loaded) |*h| {
+        @memcpy(h.bytes, mem[h.base..][0..h.bytes.len]);
+        h.next = m68k_read_memory_32(h.base - 4);
+        for (mem[h.base + h.bytes.len ..][0..16]) |byte| {
+            if (byte != 0xA5) return error.ResidentBufferOverrun;
+        }
+        for (mem[h.base - 24 ..][0..16]) |byte| {
+            if (byte != 0xA5) return error.ResidentBufferUnderrun;
+        }
+    }
+    return loaded;
+}

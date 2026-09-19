@@ -8,6 +8,8 @@ const build_zon = @import("build_zon");
 
 const hunk = @import("hunk.zig");
 const flatten = @import("flatten.zig");
+const memory_groups = @import("memory_groups.zig");
+const mixed_container = @import("mixed_container.zig");
 const container = @import("container.zig");
 const info = @import("info.zig");
 const store = @import("backends/store.zig");
@@ -122,7 +124,7 @@ const usage =
     \\execram - Amiga executable compressor
     \\
     \\Usage:
-    \\  execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|most|auto]
+    \\  execram pack [--backend=store|inflate|zultra|libdeflate|zopfli|zx0|salvador|shrinkler|lz4small|lz4normal|lz4fast|zx0fast|salvadorfast|most|auto]
     \\               [--mem=chip|fast] [--overlap=on|off|auto] [-v]
     \\               [--flash=on|off|auto] [--killtwitch] <in> <out>
     \\  execram info <packed-exe>
@@ -162,18 +164,16 @@ const usage =
     \\same kind of speed-vs-size call as lz4small/lz4normal/lz4fast,
     \\just for the ZX0 format.
     \\
-    \\--mem overrides the Chip/Fast RAM choice that's otherwise
-    \\auto-detected from the input's own hunk memory attributes (any
-    \\hunk requesting Chip RAM makes the whole packed program resident
-    \\in Chip RAM at runtime). --mem=fast on a program that actually
-    \\needs Chip RAM (custom chip DMA, audio/blitter buffers, ...) will
-    \\build successfully but can fail or misbehave when run - only
-    \\override this if you're sure.
+    \\Memory classes are preserved by default: Chip, Fast and ordinary
+    \\hunks use separate resident regions with cross-region relocations.
+    \\--mem=chip|fast explicitly collapses the input into one region;
+    \\fast keeps the historical meaning of ordinary MEMF_ANY memory.
+    \\Forcing fast on DMA assets can break the program at runtime.
     \\
     \\--overlap controls true overlap-in-place decompression
-    \\(docs/format-spec.md §8b): the resident hunk and the scratch hunk
-    \\both still exist, but the still-compressed payload moves into the
-    \\resident hunk's own tail instead of the scratch hunk, which is
+    \\(docs/format-spec.md §8b): resident regions and the scratch hunk
+    \\remain allocated while each compressed payload moves into its
+    \\resident region's own tail instead of the scratch hunk, which is
     \\freed once decompression finishes exactly as in the default
     \\layout - just much smaller now, since it no longer carries the
     \\whole compressed payload. Every backend supports this.
@@ -345,6 +345,13 @@ fn cmdPack(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     var file = try hunk.parse(arena, input_bytes);
     defer file.deinit();
 
+    if (mem_override == null and memory_groups.needed(file)) {
+        const grouped_exe = try packMemoryGroups(arena, file, backend_name, verbose, flash_mode, killtwitch, overlap_mode);
+        try cwd.writeFile(io, .{ .sub_path = out_path, .data = grouped_exe });
+        std.log.info("packed {s} -> {s} (preserved memory classes, {d} -> {d} bytes)", .{ in_path, out_path, input_bytes.len, grouped_exe.len });
+        return;
+    }
+
     var image = try flatten.flatten(arena, file);
     defer image.deinit();
 
@@ -407,6 +414,79 @@ fn packBest(arena: std.mem.Allocator, image: flatten.FlatImage, names: []const [
         }
     }
     return .{ best.?, best_name };
+}
+
+fn packMemoryGroups(arena: std.mem.Allocator, file: hunk.HunkFile, name: []const u8, verbose: bool, flash_mode: FlashMode, killtwitch: bool, overlap_mode: OverlapMode) ![]u8 {
+    const groups = try memory_groups.build(arena, file);
+    defer memory_groups.deinit(arena, groups);
+    const names: []const []const u8 = if (std.mem.eql(u8, name, "auto")) &backend_names else if (std.mem.eql(u8, name, "most")) &most_backend_names else &.{name};
+    var best: ?[]u8 = null;
+    var best_name: []const u8 = "";
+    for (names) |candidate| {
+        const grouped_exe = try packGroupsBackend(arena, groups, candidate, verbose, flash_mode, killtwitch, overlap_mode, null);
+        if (best == null or grouped_exe.len < best.?.len) {
+            if (best) |old| arena.free(old);
+            best = grouped_exe;
+            best_name = candidate;
+        } else arena.free(grouped_exe);
+    }
+    std.log.info("selected {s}; resident memory classes preserved across {d} regions", .{ best_name, groups.len });
+    return best.?;
+}
+
+fn flashListing(id: container.BackendId) []const u8 {
+    return switch (id) {
+        .store => listing_store_flash,
+        .inflate => listing_inflate_flash,
+        .zx0 => listing_zx0_flash,
+        .zx0_fast => listing_zx0fast_flash,
+        .shrinkler => listing_shrinkler_flash,
+        .lz4_small => listing_lz4small_flash,
+        .lz4_normal => listing_lz4normal_flash,
+        .lz4_fast => listing_lz4fast_flash,
+        else => unreachable,
+    };
+}
+
+const GroupMetrics = struct { cycles: u64 = 0 };
+
+fn packGroupsBackend(arena: std.mem.Allocator, groups: []const memory_groups.Group, name: []const u8, verbose: bool, flash_mode: FlashMode, killtwitch: bool, overlap_mode: OverlapMode, metrics: ?*GroupMetrics) ![]u8 {
+    const parts = try arena.alloc(mixed_container.Part, groups.len);
+    defer arena.free(parts);
+    var initialized: usize = 0;
+    defer for (parts[0..initialized]) |p| arena.free(p.payload);
+    var representative: CompressedBackend = undefined;
+    var seconds: f64 = 0;
+    for (groups, 0..) |g, i| {
+        const compressed = try compressWithBackend(arena, g.image, name, verbose);
+        if (metrics) |m| {
+            const expected = try std.mem.concat(arena, u8, &.{ g.image.code_data, g.image.reloc_stream });
+            defer arena.free(expected);
+            const measured = try musashi_bench.timeDepack(arena, compressed.stub_bytes, try musashi_bench.parseDepackOffset(compressed.stub_listing), compressed.payload, @intCast(compressed.payload.len), @intCast(expected.len));
+            defer arena.free(measured.output);
+            if (!std.mem.eql(u8, expected, measured.output)) return error.EmulatedOutputMismatch;
+            m.cycles += measured.cycles;
+        }
+        representative = compressed;
+        seconds += compressed.seconds;
+        const prefix = if (i == 0) stub_trampoline.len else 0;
+        const resident = @max(container.residentTailSize(g.image.code_data.len, g.image.bss_size, g.image.reloc_stream.len), std.mem.alignForward(u32, @intCast(prefix), 4));
+        const margin = compressed.overlap_margin.?;
+        const overlapped = container.overlapAllocatedSize(prefix, @intCast(compressed.payload.len), margin, resident);
+        // Compare each region's contribution to peak memory; the shared
+        // dispatcher and descriptor table cost the same in either layout.
+        const overlap = switch (overlap_mode) {
+            .on => true,
+            .off => false,
+            .auto => overlapped < resident + std.mem.alignForward(usize, compressed.payload.len, 4),
+        };
+        parts[i] = .{ .group = g, .payload = compressed.payload, .margin = margin, .overlap = overlap };
+        initialized += 1;
+    }
+    const flash = flash_mode == .on or (flash_mode == .auto and seconds > 1.0);
+    const decoder = if (flash) representative.flash_stub_bytes else representative.stub_bytes;
+    const listing = if (flash) flashListing(representative.backend_id) else representative.stub_listing;
+    return mixed_container.build(arena, parts, stub_trampoline, decoder, try musashi_bench.parseDepackOffset(listing), representative.backend_id, flash, killtwitch);
 }
 
 const CompressedBackend = struct {
@@ -560,7 +640,7 @@ fn compressWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backe
 /// up to a longword: unlike AllocMem's own byte-granular size argument,
 /// a HUNK_HEADER size-table entry is a count of longwords.
 fn hunk0Size(image: flatten.FlatImage) u32 {
-    return container.residentTailSize(image.code_data.len, image.bss_size, image.reloc_stream.len);
+    return @max(container.residentTailSize(image.code_data.len, image.bss_size, image.reloc_stream.len), std.mem.alignForward(u32, @intCast(stub_trampoline.len), 4));
 }
 
 fn packWithBackend(arena: std.mem.Allocator, image: flatten.FlatImage, backend_name: []const u8, verbose: bool, flash_mode: FlashMode, killtwitch: bool, overlap_mode: OverlapMode) ![]u8 {
@@ -696,6 +776,7 @@ fn cmdInfo(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
     // FLAG_OVERLAP, so the disjoint and overlap containers embed the
     // exact same stub bytes.
     const known_stubs = [_]info.KnownStub{
+        .{ .stub_name = "grouped memory", .bytes = mixed_container.stub },
         .{ .stub_name = "store", .bytes = stub_store },
         .{ .stub_name = "inflate/zultra/libdeflate/zopfli", .bytes = stub_inflate },
         .{ .stub_name = "zx0/salvador", .bytes = stub_zx0 },
@@ -752,6 +833,29 @@ fn cmdBench(io: Io, arena: std.mem.Allocator, args: []const []const u8) !void {
 
     var file = try hunk.parse(arena, input_bytes);
     defer file.deinit();
+
+    if (memory_groups.needed(file)) {
+        const groups = try memory_groups.build(arena, file);
+        defer memory_groups.deinit(arena, groups);
+        var buffer: [4096]u8 = undefined;
+        var output: Io.File.Writer = .init(.stdout(), io, &buffer);
+        const writer = &output.interface;
+        try writer.writeAll("backend          size   ratio         cycles    PAL time   check\n");
+        try writer.flush();
+        for (backends) |name| {
+            std.log.info("compressing memory regions with {s}...", .{name});
+            var metrics = GroupMetrics{};
+            const exe = try packGroupsBackend(arena, groups, name, false, .auto, false, .auto, &metrics);
+            defer arena.free(exe);
+            const ratio = 100.0 * @as(f64, @floatFromInt(exe.len)) / @as(f64, @floatFromInt(input_bytes.len));
+            const seconds = @as(f64, @floatFromInt(metrics.cycles)) / musashi_bench.PAL_CPU_HZ;
+            try writer.print("{s:<12} {d:>8} {d:>6.1}% {d:>14} {d:>9.4}s      OK\n", .{ name, exe.len, ratio, metrics.cycles, seconds });
+            try writer.flush();
+        }
+        try writer.writeAll("\nCycles sum the region depackers; exclude dispatcher, relocation, OS and DMA overhead.\n");
+        try writer.flush();
+        return;
+    }
 
     var image = try flatten.flatten(arena, file);
     defer image.deinit();
@@ -1001,4 +1105,93 @@ test {
     _ = shrinkler;
     _ = lz4;
     _ = musashi_bench;
+}
+
+test "grouped runtime preserves memory classes, reserved tails, BSS and cross-region relocations" {
+    const a = std.testing.allocator;
+    var code = [_]u8{0} ** 640;
+    var data = [_]u8{0} ** 16;
+    // Cross-region addend points into the data hunk's reserved tail.
+    std.mem.writeInt(u32, code[0..4], 28, .big);
+    var code_relocs = [_]hunk.Reloc{ .{ .offset = 0, .target_hunk = 1 }, .{ .offset = 600, .target_hunk = 2 } };
+    var data_relocs = [_]hunk.Reloc{.{ .offset = 2, .target_hunk = 0 }};
+    var hunks = [_]hunk.Hunk{
+        .{ .kind = .code, .mem_attr = .any, .data = &code, .size_bytes = code.len, .allocated_size = 1024, .relocs = &code_relocs },
+        .{ .kind = .data, .mem_attr = .chip, .data = &data, .size_bytes = data.len, .allocated_size = 32, .relocs = &data_relocs },
+        .{ .kind = .bss, .mem_attr = .fast, .data = &.{}, .size_bytes = 4, .allocated_size = 64, .relocs = &.{} },
+    };
+    const groups = try memory_groups.build(a, .{ .allocator = a, .hunks = &hunks });
+    defer memory_groups.deinit(a, groups);
+    for ([_][]const u8{ "store", "inflate", "salvador", "salvadorfast", "shrinkler", "lz4small", "lz4normal", "lz4fast" }) |name| {
+        for ([_]OverlapMode{ .off, .on, .auto }) |overlap| {
+            for ([_]FlashMode{ .off, .on }) |flash| {
+                // Compression helpers use an arena (the CLI's ownership
+                // model); retain test allocator leak checks around it.
+                var arena = std.heap.ArenaAllocator.init(a);
+                defer arena.deinit();
+                const exe = try packGroupsBackend(arena.allocator(), groups, name, false, flash, true, overlap, null);
+                var parsed = try hunk.parse(a, exe);
+                defer parsed.deinit();
+                try std.testing.expectEqual(hunk.MemAttr.any, parsed.hunks[0].mem_attr);
+                try std.testing.expectEqual(hunk.MemAttr.chip, parsed.hunks[2].mem_attr);
+                try std.testing.expectEqual(hunk.MemAttr.fast, parsed.hunks[3].mem_attr);
+                const loaded = try musashi_bench.runExecutable(a, exe);
+                defer {
+                    for (loaded) |h| a.free(h.bytes);
+                    a.free(loaded);
+                }
+                try std.testing.expectEqual(loaded[2].base + 28, std.mem.readInt(u32, loaded[0].bytes[0..4], .big));
+                try std.testing.expectEqual(loaded[3].base, std.mem.readInt(u32, loaded[0].bytes[600..604], .big));
+                try std.testing.expectEqual(loaded[0].base, std.mem.readInt(u32, loaded[2].bytes[2..6], .big));
+                for (loaded[0].bytes[640..1024]) |b| try std.testing.expectEqual(@as(u8, 0), b);
+                for (loaded[3].bytes[0..64]) |b| try std.testing.expectEqual(@as(u8, 0), b);
+                try std.testing.expectEqual((loaded[2].base - 4) / 4, loaded[0].next);
+                try std.testing.expectEqual((loaded[3].base - 4) / 4, loaded[2].next);
+                try std.testing.expectEqual(@as(u32, 0), loaded[3].next);
+            }
+        }
+    }
+}
+
+test "tiny disjoint executable fits its trampoline and reaches entry" {
+    const a = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    var bytes = [_]u8{ 0x4e, 0x75, 0x4e, 0x71 };
+    var reloc = [_]u8{0xfe};
+    const image = flatten.FlatImage{ .allocator = a, .code_data = &bytes, .bss_size = 0, .reloc_stream = &reloc, .mem_chip = false };
+    const exe = try packWithBackend(arena.allocator(), image, "store", false, .off, false, .off);
+    const loaded = try musashi_bench.runExecutable(a, exe);
+    defer {
+        for (loaded) |h| a.free(h.bytes);
+        a.free(loaded);
+    }
+    try std.testing.expectEqualSlices(u8, &bytes, loaded[0].bytes[0..4]);
+}
+
+test "single explicit Fast region uses MEMF_FAST and detaches scratch" {
+    const a = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    var bytes = [_]u8{ 0x4e, 0x75, 0x4e, 0x71 };
+    var hunks = [_]hunk.Hunk{.{ .kind = .code, .mem_attr = .fast, .data = &bytes, .size_bytes = 4, .allocated_size = 64, .relocs = &.{} }};
+    const file = hunk.HunkFile{ .allocator = a, .hunks = &hunks };
+    try std.testing.expect(memory_groups.needed(file));
+    const groups = try memory_groups.build(a, file);
+    defer memory_groups.deinit(a, groups);
+    const exe = try packGroupsBackend(arena.allocator(), groups, "store", false, .off, false, .auto, null);
+    var parsed = try hunk.parse(a, exe);
+    defer parsed.deinit();
+    try std.testing.expectEqual(hunk.MemAttr.fast, parsed.hunks[0].mem_attr);
+    const loaded = try musashi_bench.runExecutable(a, exe);
+    defer {
+        for (loaded) |h| a.free(h.bytes);
+        a.free(loaded);
+    }
+    try std.testing.expectEqualSlices(u8, &bytes, loaded[0].bytes[0..4]);
+    try std.testing.expectEqual(@as(u32, 0), loaded[0].next);
+    var report: Io.Writer.Allocating = .init(a);
+    defer report.deinit();
+    try info.printInfo(a, &report.writer, exe, &.{.{ .stub_name = "grouped", .bytes = mixed_container.stub }});
+    try std.testing.expect(std.mem.indexOf(u8, report.written(), "region 0: fast") != null);
 }

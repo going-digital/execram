@@ -10,7 +10,7 @@ interchangeable compression backends rather than just one.
 ## How it works
 
 - **Flatten.** The input's hunks (code/data/BSS, relocations) are
-  flattened into a single image plus a relocation stream - the
+  grouped by memory class and flattened into images plus relocation streams - the
   compressor never has to understand hunks or relocations itself.
 - **Compress.** One of several pluggable backends compresses that
   image: DEFLATE ([inflate](docs/algorithm-notes/inflate.md)),
@@ -22,8 +22,8 @@ interchangeable compression backends rather than just one.
   the inflate and ZX0 depackers respectively rather than needing stubs
   of their own.
 - **Package.** The compressed payload is wrapped with a small 68k
-  depacker stub into a new two-hunk AmigaDOS executable: a tiny
-  resident hunk sized for the decompressed program, and a scratch hunk
+  depacker stub into a new AmigaDOS executable: resident hunks sized for the
+  decompressed program and preserving its memory classes, and a scratch hunk
   (stub + payload) that decompresses in place and is freed before the
   program itself runs - see
   [docs/memory-lifecycle.md](docs/memory-lifecycle.md).
@@ -63,12 +63,14 @@ program, not something execram decides for you (see `execram bench`).
 `zx0fast`/`salvadorfast` make the same trade for the ZX0 format:
 `zx0`'s/`salvador`'s exact host encoders paired with a faster depacker
 (Chris Hodges/Platon42's fork), ~29% fewer decompression cycles for a
-64-byte larger stub. Chip vs. Fast RAM is normally auto-detected from
-the input; `--mem` overrides it. `--overlap=auto` (the default) moves
+64-byte larger stub. Chip, explicit Fast, and ordinary RAM requirements are preserved
+in separate resident regions when needed, including relocations between
+regions and hunk allocations larger than their stored bodies. `--mem`
+explicitly overrides this with one region (`fast` retains its historical
+meaning of ordinary `MEMF_ANY`; it does not force `MEMF_FAST`). `--overlap=auto` (the default) moves
 the still-compressed payload into the resident hunk's own tail instead
 of the scratch hunk whenever that reduces peak memory for this file
-(every backend supports it); `--overlap=off` always uses the plain
-two-hunk layout.
+(every backend supports it); `--overlap=off` keeps compressed payloads in the scratch hunk.
 
 `--flash=auto` (the default) makes a slow decompression (Shrinkler on
 a large file can take tens of seconds of real 68000 time) write
@@ -121,7 +123,7 @@ zig build -Dvasm=/path/to/vasmm68k_mot -Dvlink=/path/to/vlink
 
 ## Status
 
-v1.0: all six backends pack and boot real Amiga executables correctly,
+All thirteen backend choices are available. Packed programs are
 verified against real emulated 68k hardware, not just host-side tests -
 see [PROJECT_PLAN.md](PROJECT_PLAN.md#7-milestones) for the full
 milestone history and [CONTRIBUTING.md](CONTRIBUTING.md) for how the

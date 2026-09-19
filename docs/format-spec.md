@@ -1,6 +1,11 @@
-# execram container format — v0
+# execram container formats
 
-**Status:** shipped as of v1.0. All six backends (store, inflate, zultra,
+Mixed-memory inputs and explicit Fast RAM inputs use **v1.0**, documented
+in [grouped-memory-format.md](grouped-memory-format.md). The v0 format
+below remains in use for ordinary-only and Chip-only inputs, and explicit
+`--mem` overrides. Both preserve the full original allocation sizes.
+
+**v0 status:** shipped as of v1.0. All six backends (store, inflate, zultra,
 zx0, salvador, shrinkler) implement this exact format, verified against
 real emulated 68k hardware (`tests/uae/`) as well as host-side unit
 tests. §9's versioning policy is now live: a change to anything a stub
@@ -181,7 +186,7 @@ of the resident image. `flatten.zig` (M1) must guarantee this; there's no
 | 4   | `KILLTWITCH` | Only meaningful when `FLAG_FLASH` (bit 2) is also set — meaningless (and never set) otherwise. When set, the flash-instrumented stub's poke target is `COLOR00` ($dff180, the border/background register) instead of `COLOR17` ($dff1a2, the mouse pointer sprite's own middle colour — the default), for programs that already use the pointer sprite for something else during decompression. Like `FLASH` itself, purely informational — the actual target address was baked into the embedded stub at pack time (read once from this same bit, before it's overwritten — see each backend's own `stub_*_flash.s`). Set by `execram pack --flash=on\|auto --killtwitch`. |
 | 5-7 | *(reserved)* | Must be 0 in v0. A stub must ignore reserved bits it doesn't understand rather than reject the file — only a `version_major` bump means "you must understand this to run me correctly." |
 
-**Known limitation, inherited from flattening multiple hunks into one:**
+**Historical v0 limitation (avoided by v1 by default):**
 if the original program had some hunks that needed Chip RAM and others
 that didn't, that distinction is lost — the whole merged image gets one
 memory-type decision. This is the same trade-off Shrinkler's own hunk
@@ -570,12 +575,8 @@ safely ignore (a newly-meaningful reserved flag bit, say).
   [PROJECT_PLAN.md](../PROJECT_PLAN.md) §10, would most naturally live as
   another `flags` bit or a small stub-selection table in the host tool,
   not a header change.
-- Whether `MEM_CHIP`'s all-or-nothing merge (§5) ever needs a per-region
-  escape hatch — deferred until a real program with mixed chip/fast
-  hunks makes it a concrete problem rather than a theoretical one. (The
-  two-hunk redesign already fixed the narrower version of this that
-  applied to hunk 1 itself - it's now always `MEMF_ANY`, never forced
-  into Chip RAM alongside hunk 0.)
+- Per-region memory requirements are now supported by
+  [v1 grouped memory](grouped-memory-format.md), addressing GitHub issue #2.
 - Whether `CacheClearU` (a 68020+ instruction-cache flush before jumping
   into freshly-decompressed code, skipped on plain 68000s) is a real gap
   on real 68020+ hardware - Shrinkler's own default and `--overlap`

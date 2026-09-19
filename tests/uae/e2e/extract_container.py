@@ -38,13 +38,11 @@ def main() -> int:
         print("error: not a HUNK_HEADER file", file=sys.stderr)
         return 1
     table_size = struct.unpack(">I", data[8:12])[0]
-    if table_size != 2:
-        print(f"error: expected exactly two hunks, found {table_size}", file=sys.stderr)
+    if not 2 <= table_size <= 4:
+        print(f"error: expected two to four hunks, found {table_size}", file=sys.stderr)
         return 1
-    # Offset 28 (HUNK_HEADER + reslist + table_size + first_hunk +
-    # last_hunk + two size-table longwords = 7 longwords) is hunk 0's
-    # own HUNK_CODE marker.
-    if struct.unpack(">I", data[28:32])[0] != HUNK_CODE:
+    # Five fixed header words, followed by one size word per hunk.
+    if struct.unpack(">I", data[20 + table_size * 4:24 + table_size * 4])[0] != HUNK_CODE:
         print("error: hunk 0 is not a HUNK_CODE hunk", file=sys.stderr)
         return 1
 

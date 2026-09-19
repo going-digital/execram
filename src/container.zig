@@ -349,6 +349,7 @@ test "writeHunkExecutable round-trips through hunk.zig" {
     // it at runtime (hunk.zig's `size_bytes` reports this hunk's own
     // restated body size, not the table's - see that field's own doc).
     try std.testing.expectEqual(@as(u32, 8), file.hunks[0].size_bytes);
+    try std.testing.expectEqual(@as(u32, 64), file.hunks[0].allocationSize());
     try std.testing.expectEqualSlices(u8, trampoline, file.hunks[0].data[0..trampoline.len]);
 
     try std.testing.expectEqual(hunk.HunkKind.code, file.hunks[1].kind);

@@ -7,6 +7,14 @@ runtime algorithm itself) - this page is about the *memory*, not the
 instructions: what exists, where, for how long, and what (if anything) is
 ever freed.
 
+For mixed memory classes, [v1's grouped layout](grouped-memory-format.md)
+keeps one resident region per class, plus a shared scratch hunk. LoadSeg
+allocates each with its original ANY/CHIP/FAST requirement. Each region
+is decompressed directly into its own allocation, cross-region relocations
+are applied, and only scratch is detached and freed. There is no temporary
+full-program output buffer. Explicit Fast-only inputs also use this layout.
+The two-hunk account below describes v0's single resident region.
+
 The short version: **AmigaDOS's own `LoadSeg` does every allocation - the
 runtime itself makes none at all.** Two hunks are resident throughout
 decompression; the second is freed by the stub's own code the moment it's

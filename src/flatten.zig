@@ -61,28 +61,31 @@ pub fn flatten(allocator: std.mem.Allocator, file: hunk.HunkFile) FlattenError!F
     var bss_size: u64 = 0;
     for (file.hunks) |h| {
         if (h.mem_attr == .chip) mem_chip = true;
-        if (h.kind == .bss) bss_size += h.size_bytes else code_data_size += h.size_bytes;
+        if (h.kind == .bss) bss_size += h.allocationSize() else code_data_size += h.allocationSize();
     }
-    if (code_data_size > std.math.maxInt(u32) or bss_size > std.math.maxInt(u32)) return error.Overflow;
+    if (code_data_size + bss_size > std.math.maxInt(u32)) return error.Overflow;
 
     {
         var offset: u32 = 0;
         for (file.hunks, 0..) |h, i| {
             if (h.kind == .bss) continue;
             merge_base[i] = offset;
-            offset += h.size_bytes;
+            offset += h.allocationSize();
         }
         var bss_offset: u32 = @intCast(code_data_size);
         for (file.hunks, 0..) |h, i| {
             if (h.kind != .bss) continue;
             merge_base[i] = bss_offset;
-            bss_offset += h.size_bytes;
+            bss_offset += h.allocationSize();
         }
     }
 
     // Pass 2: copy non-BSS hunk bytes into place.
     var code_data = try allocator.alloc(u8, @intCast(code_data_size));
     errdefer allocator.free(code_data);
+    // Keep every hunk's reserved tail before the next hunk: relocation
+    // addends can legally address it. Zero padding compresses cheaply.
+    @memset(code_data, 0);
     for (file.hunks, 0..) |h, i| {
         if (h.kind == .bss) continue;
         @memcpy(code_data[merge_base[i]..][0..h.data.len], h.data);
@@ -182,6 +185,28 @@ test "flattens the real fixture with relocations folded in" {
 
     // Sites at 8, 16, 28 -> half-deltas 4, 4, 6, then the 0xFE terminator.
     try std.testing.expectEqualSlices(u8, &.{ 0x04, 0x04, 0x06, 0xFE }, image.reloc_stream);
+}
+
+test "preserves reserved tails and relocations into and across them" {
+    const a = std.testing.allocator;
+    var data = [_]u8{ 0, 0, 0, 12, 0, 0, 0, 0 };
+    var relocs = [_]hunk.Reloc{
+        .{ .target_hunk = 0, .offset = 0 },
+        .{ .target_hunk = 1, .offset = 4 },
+    };
+    var hunks = [_]hunk.Hunk{
+        .{ .kind = .code, .mem_attr = .any, .data = &data, .size_bytes = 8, .allocated_size = 16, .relocs = &relocs },
+        .{ .kind = .data, .mem_attr = .any, .data = &.{ 1, 2, 3, 4 }, .size_bytes = 4, .allocated_size = 8, .relocs = &.{} },
+        .{ .kind = .bss, .mem_attr = .any, .data = &.{}, .size_bytes = 4, .allocated_size = 32, .relocs = &.{} },
+    };
+    var image = try flatten(a, .{ .allocator = a, .hunks = &hunks });
+    defer image.deinit();
+    try std.testing.expectEqual(@as(usize, 24), image.code_data.len);
+    try std.testing.expectEqual(@as(u32, 32), image.bss_size);
+    try std.testing.expectEqual(@as(u32, 12), std.mem.readInt(u32, image.code_data[0..4], .big));
+    try std.testing.expectEqual(@as(u32, 16), std.mem.readInt(u32, image.code_data[4..8], .big));
+    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 8), image.code_data[8..16]);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 0, 0, 0, 0 }, image.code_data[16..24]);
 }
 
 test "rejects an odd reloc offset" {

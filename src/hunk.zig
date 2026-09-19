@@ -63,17 +63,16 @@ pub const Hunk = struct {
     /// Borrowed from the input buffer passed to `parse` - empty for BSS.
     /// Callers must keep that buffer alive as long as this Hunk is used.
     data: []const u8,
-    /// For BSS, the zero-fill length (data.len is 0). For code/data,
-    /// always equal to data.len - kept as a separate field so all three
-    /// kinds read the same way. This is the hunk's own *restated* size
-    /// (right after its own HUNK_CODE/DATA/BSS marker in the file), not
-    /// necessarily the master hunk-size table's declared/allocated size
-    /// for it - the two may legally differ (this one no bigger than the
-    /// table's), which `parse` permits but does not expose further; no
-    /// current caller needs the table's own value.
+    /// Body length (or BSS zero-fill length), distinct from the loader's
+    /// allocation. Legal executables can reserve a larger writable tail.
     size_bytes: u32,
+    allocated_size: ?u32 = null,
     /// Owned; freed by HunkFile.deinit.
     relocs: []Reloc,
+
+    pub fn allocationSize(self: Hunk) u32 {
+        return self.allocated_size orelse self.size_bytes;
+    }
 };
 
 pub const HunkFile = struct {
@@ -212,6 +211,7 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) ParseError!HunkFil
             .mem_attr = mem_attrs[i],
             .data = data,
             .size_bytes = size_bytes,
+            .allocated_size = planned_sizes[i],
             .relocs = try relocs.toOwnedSlice(allocator),
         });
     }

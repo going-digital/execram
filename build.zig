@@ -113,6 +113,7 @@ fn fileExists(b: *std.Build, path: []const u8) bool {
 }
 
 const stubs = [_]Stub{
+    .{ .name = "stub_mixed", .source = "stubs/common/mixed.s", .include_dir = "stubs/common" },
     .{ .name = "stub_example", .source = "stubs/example/hello.s" },
     // Hunk 0's own body for every backend alike (docs/memory-lifecycle.md's
     // "new default" - src/container.zig's writeHunkExecutable). No

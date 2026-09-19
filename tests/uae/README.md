@@ -1,5 +1,13 @@
 # FS-UAE boot tests
 
+For the reserved-allocation and mixed-memory regression, run
+`EXECRAM_KICKSTART=/path/to/ROM python3 tests/uae/run_mixed_memory_test.py`.
+It boots the original and five backend variants through real AmigaDOS on
+a 512 KB Chip + 512 KB Slow A500. Backend names can be supplied as arguments.
+The bare-metal corpus loader also accepts v1's additional resident hunks.
+For a targeted real-game check, set `EXECRAM_TEST_BACKEND=zultra` when running
+`run_real_exe_test.sh`; omitting it keeps the full existing matrix.
+
 Headless-ish (FS-UAE still opens a small window) boot tests that run real
 assembled 68k code under a real Kickstart ROM in FS-UAE, checking success
 via the emulated serial port. This is the only way to catch relocation,

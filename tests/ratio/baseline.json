@@ -1,184 +1,434 @@
 {
   "corpus_bss_heavy": {
     "inflate": {
-      "seconds": 0.012,
-      "size": 1328
+      "seconds": 0.011,
+      "size": 1372
+    },
+    "libdeflate": {
+      "seconds": 0.011,
+      "size": 1372
+    },
+    "lz4fast": {
+      "seconds": 0.005,
+      "size": 4284
+    },
+    "lz4normal": {
+      "seconds": 0.005,
+      "size": 744
+    },
+    "lz4small": {
+      "seconds": 0.006,
+      "size": 636
     },
     "salvador": {
-      "seconds": 0.014,
-      "size": 512
+      "seconds": 0.006,
+      "size": 628
+    },
+    "salvadorfast": {
+      "seconds": 0.006,
+      "size": 688
     },
     "shrinkler": {
-      "seconds": 0.013,
-      "size": 616
+      "seconds": 0.012,
+      "size": 728
     },
     "store": {
-      "seconds": 0.012,
-      "size": 492
+      "seconds": 0.007,
+      "size": 608
+    },
+    "zopfli": {
+      "seconds": 0.016,
+      "size": 1372
     },
     "zultra": {
-      "seconds": 0.013,
-      "size": 1328
+      "seconds": 0.011,
+      "size": 1372
     },
     "zx0": {
-      "seconds": 0.012,
-      "size": 512
+      "seconds": 0.006,
+      "size": 628
+    },
+    "zx0fast": {
+      "seconds": 0.006,
+      "size": 688
     }
   },
   "corpus_chip_mem": {
     "inflate": {
-      "seconds": 0.012,
-      "size": 1280
+      "seconds": 0.016,
+      "size": 1736
+    },
+    "libdeflate": {
+      "seconds": 0.016,
+      "size": 1736
+    },
+    "lz4fast": {
+      "seconds": 0.006,
+      "size": 4644
+    },
+    "lz4normal": {
+      "seconds": 0.005,
+      "size": 1104
+    },
+    "lz4small": {
+      "seconds": 0.006,
+      "size": 996
     },
     "salvador": {
-      "seconds": 0.013,
-      "size": 464
+      "seconds": 0.006,
+      "size": 992
+    },
+    "salvadorfast": {
+      "seconds": 0.006,
+      "size": 1052
     },
     "shrinkler": {
-      "seconds": 0.013,
-      "size": 572
+      "seconds": 0.011,
+      "size": 1100
     },
     "store": {
-      "seconds": 0.012,
-      "size": 412
+      "seconds": 0.005,
+      "size": 940
+    },
+    "zopfli": {
+      "seconds": 0.019,
+      "size": 1736
     },
     "zultra": {
-      "seconds": 0.014,
-      "size": 1280
+      "seconds": 0.011,
+      "size": 1740
     },
     "zx0": {
-      "seconds": 0.012,
-      "size": 464
+      "seconds": 0.006,
+      "size": 992
+    },
+    "zx0fast": {
+      "seconds": 0.006,
+      "size": 1052
     }
   },
   "corpus_hexagon": {
     "inflate": {
-      "seconds": 0.05,
-      "size": 150844
+      "seconds": 0.895,
+      "size": 150360
+    },
+    "libdeflate": {
+      "seconds": 0.956,
+      "size": 145720
+    },
+    "lz4fast": {
+      "seconds": 0.086,
+      "size": 173464
+    },
+    "lz4normal": {
+      "seconds": 0.148,
+      "size": 169924
+    },
+    "lz4small": {
+      "seconds": 0.183,
+      "size": 169840
     },
     "salvador": {
-      "seconds": 13.29,
-      "size": 156516
+      "seconds": 1.925,
+      "size": 157120
+    },
+    "salvadorfast": {
+      "seconds": 1.886,
+      "size": 157184
     },
     "shrinkler": {
-      "seconds": 14.91,
-      "size": 142044
+      "seconds": 7.707,
+      "size": 142384
     },
     "store": {
-      "seconds": 0.01,
-      "size": 216424
+      "seconds": 0.056,
+      "size": 217580
+    },
+    "zopfli": {
+      "seconds": 1.495,
+      "size": 144508
     },
     "zultra": {
-      "seconds": 0.33,
-      "size": 144216
+      "seconds": 0.956,
+      "size": 144672
     },
     "zx0": {
-      "seconds": 508.45,
-      "size": 156504
+      "seconds": 80.073,
+      "size": 157124
+    },
+    "zx0fast": {
+      "seconds": 80.925,
+      "size": 157188
+    }
+  },
+  "corpus_hexagon2": {
+    "inflate": {
+      "seconds": 0.929,
+      "size": 150296
+    },
+    "libdeflate": {
+      "seconds": 0.986,
+      "size": 145652
+    },
+    "lz4fast": {
+      "seconds": 0.088,
+      "size": 173368
+    },
+    "lz4normal": {
+      "seconds": 0.153,
+      "size": 169828
+    },
+    "lz4small": {
+      "seconds": 0.186,
+      "size": 169744
+    },
+    "salvador": {
+      "seconds": 1.959,
+      "size": 157044
+    },
+    "salvadorfast": {
+      "seconds": 1.903,
+      "size": 157108
+    },
+    "shrinkler": {
+      "seconds": 7.843,
+      "size": 142320
+    },
+    "store": {
+      "seconds": 0.058,
+      "size": 217388
+    },
+    "zopfli": {
+      "seconds": 1.502,
+      "size": 144428
+    },
+    "zultra": {
+      "seconds": 0.987,
+      "size": 144616
+    },
+    "zx0": {
+      "seconds": 81.424,
+      "size": 157048
+    },
+    "zx0fast": {
+      "seconds": 80.634,
+      "size": 157112
     }
   },
   "corpus_incompressible": {
     "inflate": {
-      "seconds": 0.014,
-      "size": 1588
+      "seconds": 0.012,
+      "size": 1632
+    },
+    "libdeflate": {
+      "seconds": 0.013,
+      "size": 1632
+    },
+    "lz4fast": {
+      "seconds": 0.006,
+      "size": 4520
+    },
+    "lz4normal": {
+      "seconds": 0.007,
+      "size": 980
+    },
+    "lz4small": {
+      "seconds": 0.007,
+      "size": 872
     },
     "salvador": {
-      "seconds": 0.052,
-      "size": 748
+      "seconds": 0.009,
+      "size": 864
+    },
+    "salvadorfast": {
+      "seconds": 0.009,
+      "size": 924
     },
     "shrinkler": {
-      "seconds": 0.045,
-      "size": 868
+      "seconds": 0.023,
+      "size": 980
     },
     "store": {
-      "seconds": 0.012,
-      "size": 2436
+      "seconds": 0.006,
+      "size": 2552
+    },
+    "zopfli": {
+      "seconds": 0.127,
+      "size": 1624
     },
     "zultra": {
-      "seconds": 0.015,
-      "size": 1588
+      "seconds": 0.013,
+      "size": 1632
     },
     "zx0": {
-      "seconds": 0.07,
-      "size": 748
+      "seconds": 0.013,
+      "size": 864
+    },
+    "zx0fast": {
+      "seconds": 0.012,
+      "size": 924
     }
   },
   "corpus_no_relocs": {
     "inflate": {
-      "seconds": 0.013,
-      "size": 1280
+      "seconds": 0.011,
+      "size": 1324
+    },
+    "libdeflate": {
+      "seconds": 0.011,
+      "size": 1324
+    },
+    "lz4fast": {
+      "seconds": 0.005,
+      "size": 4228
+    },
+    "lz4normal": {
+      "seconds": 0.005,
+      "size": 688
+    },
+    "lz4small": {
+      "seconds": 0.005,
+      "size": 580
     },
     "salvador": {
-      "seconds": 0.014,
-      "size": 464
+      "seconds": 0.005,
+      "size": 580
+    },
+    "salvadorfast": {
+      "seconds": 0.006,
+      "size": 640
     },
     "shrinkler": {
-      "seconds": 0.014,
-      "size": 572
+      "seconds": 0.01,
+      "size": 688
     },
     "store": {
-      "seconds": 0.012,
-      "size": 412
+      "seconds": 0.006,
+      "size": 528
+    },
+    "zopfli": {
+      "seconds": 0.014,
+      "size": 1324
     },
     "zultra": {
-      "seconds": 0.015,
-      "size": 1280
+      "seconds": 0.011,
+      "size": 1324
     },
     "zx0": {
-      "seconds": 0.013,
-      "size": 464
+      "seconds": 0.005,
+      "size": 580
+    },
+    "zx0fast": {
+      "seconds": 0.005,
+      "size": 640
     }
   },
   "large": {
     "inflate": {
-      "seconds": 0.012,
-      "size": 3620
+      "seconds": 0.027,
+      "size": 3664
+    },
+    "libdeflate": {
+      "seconds": 0.027,
+      "size": 3600
+    },
+    "lz4fast": {
+      "seconds": 0.008,
+      "size": 7524
+    },
+    "lz4normal": {
+      "seconds": 0.009,
+      "size": 3984
+    },
+    "lz4small": {
+      "seconds": 0.011,
+      "size": 3876
     },
     "salvador": {
-      "seconds": 0.327,
-      "size": 2928
+      "seconds": 0.053,
+      "size": 3048
+    },
+    "salvadorfast": {
+      "seconds": 0.052,
+      "size": 3108
     },
     "shrinkler": {
-      "seconds": 0.262,
-      "size": 2832
+      "seconds": 0.139,
+      "size": 2944
     },
     "store": {
-      "seconds": 0.012,
-      "size": 5480
+      "seconds": 0.007,
+      "size": 5596
+    },
+    "zopfli": {
+      "seconds": 0.043,
+      "size": 3528
     },
     "zultra": {
-      "seconds": 0.017,
-      "size": 3556
+      "seconds": 0.027,
+      "size": 3596
     },
     "zx0": {
-      "seconds": 0.756,
-      "size": 2928
+      "seconds": 0.144,
+      "size": 3048
+    },
+    "zx0fast": {
+      "seconds": 0.144,
+      "size": 3108
     }
   },
   "small": {
     "inflate": {
+      "seconds": 0.014,
+      "size": 1316
+    },
+    "libdeflate": {
       "seconds": 0.013,
-      "size": 1272
+      "size": 1316
+    },
+    "lz4fast": {
+      "seconds": 0.006,
+      "size": 4224
+    },
+    "lz4normal": {
+      "seconds": 0.006,
+      "size": 684
+    },
+    "lz4small": {
+      "seconds": 0.006,
+      "size": 576
     },
     "salvador": {
-      "seconds": 0.013,
-      "size": 456
+      "seconds": 0.006,
+      "size": 576
+    },
+    "salvadorfast": {
+      "seconds": 0.006,
+      "size": 636
     },
     "shrinkler": {
-      "seconds": 0.013,
-      "size": 564
+      "seconds": 0.01,
+      "size": 680
     },
     "store": {
-      "seconds": 0.013,
-      "size": 404
+      "seconds": 0.268,
+      "size": 520
+    },
+    "zopfli": {
+      "seconds": 0.017,
+      "size": 1316
     },
     "zultra": {
-      "seconds": 0.013,
-      "size": 1272
+      "seconds": 0.012,
+      "size": 1316
     },
     "zx0": {
-      "seconds": 0.012,
-      "size": 456
+      "seconds": 0.006,
+      "size": 576
+    },
+    "zx0fast": {
+      "seconds": 0.006,
+      "size": 636
     }
   }
 }

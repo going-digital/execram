@@ -1,5 +1,11 @@
 # tools/bench: 68000 depack-cycle predictor
 
+This standalone tool reads disjoint, non-flashing v0 packed files using
+its original store,
+inflate, ZX0 and Shrinkler depackers. For v1 grouped-memory files,
+use `execram bench <original-executable>`; it reports the combined cost of
+all region depackers and the actual grouped output size.
+
 A dev-only tool (a separate binary from `execram` itself) that
 predicts how many real 68000 CPU cycles an *already-packed* executable's
 depacker stub takes to run - built around

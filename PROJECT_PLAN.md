@@ -162,6 +162,21 @@ PROJECT_PLAN.md                 this file
 
 ## 7. Milestones
 
+**September 2026 correctness follow-up (issue #2 and project review)**
+- Preserve each HUNK's allocation size separately from its stored body;
+  retain reserved tails and relocation addends into them.
+- Use [v1 grouped memory](docs/grouped-memory-format.md) for mixed memory
+  classes and explicit Fast RAM, retaining cross-region relocations and
+  the resident LoadSeg chain while freeing one shared scratch hunk.
+- Size tiny single-region allocations to fit their trampoline.
+- Expand the ratio baseline to thirteen backends / eight programs, keep
+  strict growth checks, and run them in the release gate as well as CI.
+- Verification: 42 host tests (including full runtime emulation), the
+  large serial-transcript boot test, 24 synthetic corpus boots, a split-
+  memory A500 regression across five backends, and both real game corpus
+  entries with zultra. See [baseline review](tests/ratio/README.md).
+
+
 **M0 — Foundations** (~1–2 weeks)
 - ~~License audit~~ ✅ done — see [`docs/LICENSES.md`](docs/LICENSES.md)
 - ~~Repo scaffold~~ ✅ done — Zig 0.16 project (`build.zig`/`build.zig.zon`),

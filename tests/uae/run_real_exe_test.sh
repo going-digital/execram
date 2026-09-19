@@ -94,6 +94,15 @@ DISJOINT_BACKENDS=(inflate shrinkler)
 # --flash=on itself gets real-hardware coverage.
 FLASH_BACKENDS=(store shrinkler lz4fast)
 
+# Targeted runtime checks can reuse the same real-AmigaDOS harness.
+# Omit this variable to retain the complete matrix above.
+if [ -n "${EXECRAM_TEST_BACKEND:-}" ]; then
+  BACKENDS=("$EXECRAM_TEST_BACKEND")
+  OVERLAP_BACKENDS=()
+  DISJOINT_BACKENDS=()
+  FLASH_BACKENDS=()
+fi
+
 if [ -z "${EXECRAM_KICKSTART:-}" ]; then
   echo "error: set EXECRAM_KICKSTART to a Kickstart ROM path (see run_boot_test.sh's header)" >&2
   exit 2
@@ -302,7 +311,7 @@ done
 
 echo ""
 if [ "$overall_pass" -eq 1 ]; then
-  echo "PASS: every real executable passed under every backend"
+  echo "PASS: every real executable passed under every selected backend"
   exit 0
 else
   echo "FAIL: at least one (executable, backend) combination failed - see above" >&2

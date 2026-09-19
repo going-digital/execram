@@ -62,7 +62,7 @@ fn backendDecompress(backend_id: u8, allocator: std.mem.Allocator, payload: []co
         .inflate => inflate.decompress(allocator, payload, expected_len),
         .zx0 => zx0.decompress(allocator, payload, expected_len),
         .shrinkler => shrinkler.decompress(allocator, payload, expected_len),
-        _ => error.UnknownBackendId,
+        else => error.UnknownBackendId,
     };
 }
 
@@ -86,6 +86,10 @@ pub fn main(init: std.process.Init) !void {
 
     var file = try hunk.parse(allocator, exe_bytes);
     defer file.deinit();
+    if (file.hunks.len >= 2 and std.mem.startsWith(u8, file.hunks[1].data, @embedFile("stub_mixed"))) {
+        std.log.err("grouped-memory containers have multiple payloads; use execram bench <original-executable>", .{});
+        return error.UnsupportedGroupedContainer;
+    }
     // docs/memory-lifecycle.md: hunk 0 is the trampoline, hunk 1 holds
     // the actual stub+header+payload container - see src/info.zig's own
     // identical check for the full rationale.
@@ -97,6 +101,10 @@ pub fn main(init: std.process.Init) !void {
     var known_list: [known_stubs.len]info.KnownStub = undefined;
     for (known_stubs, 0..) |entry, i| known_list[i] = entry.known;
     const header = try info.locateHeader(container_data, &known_list);
+    if (header.isOverlap()) {
+        std.log.err("overlap payloads reside in another hunk; use execram bench <original-executable>", .{});
+        return error.UnsupportedOverlapContainer;
+    }
 
     const stub_entry = for (known_stubs) |entry| {
         if (entry.known.bytes.ptr == header.stub.bytes.ptr) break entry;

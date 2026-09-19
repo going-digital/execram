@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -39,8 +40,8 @@ jobs:
       - name: zig build test
         run: zig build test --summary all
 
-      - name: zig build
-        run: zig build --summary all
+      - name: Build release executable for ratio checks
+        run: zig build -Doptimize=ReleaseFast --summary all
 
       # M6 ratio/speed regression tracking (PROJECT_PLAN.md): host-side
       # only (packs a fixed set of test programs and compares sizes

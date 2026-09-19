@@ -38,7 +38,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 BASELINE_PATH = os.path.join(SCRIPT_DIR, "baseline.json")
 
-BACKENDS = ["store", "inflate", "zultra", "zx0", "salvador", "shrinkler"]
+BACKENDS = ["store", "inflate", "zultra", "libdeflate", "zopfli", "zx0", "salvador", "shrinkler", "lz4small", "lz4normal", "lz4fast", "zx0fast", "salvadorfast"]
 
 
 def run(cmd, **kwargs):
@@ -129,7 +129,14 @@ def main() -> int:
         programs = build_test_programs(work_dir, vasm, vlink)
         current = measure(execram, programs, work_dir)
 
+    report = os.environ.get("EXECRAM_RATIO_REPORT")
+    if report:
+        with open(report, "w") as f:
+            json.dump(current, f, indent=2, sort_keys=True)
+            f.write("\n")
+
     regressed = False
+    missing = False
     print(f"{'program':<24}{'backend':<12}{'baseline':>10}{'current':>10}{'delta':>10}  status")
     for name in sorted(current):
         for backend in BACKENDS:
@@ -137,6 +144,7 @@ def main() -> int:
             base = baseline.get(name, {}).get(backend, {}).get("size")
             if base is None:
                 status = "NEW (no baseline yet)"
+                missing = True
             elif cur > base:
                 status = "REGRESSION"
                 regressed = True
@@ -152,6 +160,10 @@ def main() -> int:
         save_baseline(current)
         print(f"\nWrote {BASELINE_PATH}")
         return 0
+
+    if missing:
+        print("\nFAIL: missing baseline entries; review the measurements before updating.", file=sys.stderr)
+        return 1
 
     if regressed:
         print("\nFAIL: at least one backend's output grew relative to the committed baseline.", file=sys.stderr)

@@ -100,52 +100,39 @@ start:				; +12: entry point, A1 = trackdisk IORequest
 	tst.b	IO_ERROR(a2)
 	bne.w	error
 
-	; --- parse the two-hunk file and rebuild LoadSeg's own layout ---
-	lea	20(a3),a0		; skip HUNK_HEADER/reslist/table_size/first_hunk/last_hunk (5 longwords)
-	move.l	(a0)+,d2		; d2 = hunk 0's declared size+flags
-	move.l	(a0)+,d1		; d1 = hunk 1's declared size+flags - stashed on the stack until needed
-	move.l	d1,-(a7)
-	addq.l	#4,a0			; skip hunk 0's own HUNK_CODE marker
-	move.l	(a0)+,d4		; d4 = hunk 0's own real body size, in longwords
-
-	; AllocHunk's own code only touches D0/D1/D3/A1, but the real
-	; EXEC_AllocMem call it makes inside is standard Amiga library code,
-	; free to clobber A0/A1/D0/D1 same as any other LVO call - confirmed
-	; the hard way (a real bug here, not a theoretical one): without
-	; this save/restore, A0 (our own read position in the scratch
-	; buffer) came back clobbered after the call, and both hunks' real
-	; bodies silently "copied" as all-zero (MEMF_CLEAR's own fill,
-	; untouched, since CopyLongs then read from wherever A0 actually
-	; ended up instead) rather than their real bytes - found by dumping
-	; the constructed blocks' own memory over serial before the jump and
-	; seeing 0 where the trampoline's/stub's real first instruction
-	; bytes belonged.
-	move.l	a0,-(a7)
-	bsr.w	AllocHunk		; in: d2; out: a1 = hunk 0's new block, its own size already written at +0
-	move.l	(a7)+,a0
-	move.l	a1,a4			; a4 = hunk 0's block base, kept to the end (its data start is the final jump target)
-	lea	8(a4),a1
-	move.l	d4,d0
-	bsr.w	CopyLongs		; hunk 0's real on-disk body -> its own block+8; a0 left just past it
-	lea	8(a0),a0		; skip HUNK_END + hunk 1's own HUNK_CODE marker
-
-	move.l	(a7)+,d2		; d2 = hunk 1's declared size+flags
-	move.l	(a0)+,d4		; d4 = hunk 1's own real body size, in longwords
-	move.l	a0,-(a7)		; A0 must survive the nested EXEC_AllocMem call - see the comment at the first AllocHunk call site
-	bsr.w	AllocHunk		; out: a1 = hunk 1's new block
-	move.l	(a7)+,a0
-	move.l	a1,a5			; a5 = hunk 1's block base
-	lea	8(a5),a1
-	move.l	d4,d0
-	bsr.w	CopyLongs		; hunk 1's real on-disk body -> its own block+8
-
-	; Link hunk 0 -> hunk 1, exactly as a real LoadSeg would: hunk 0's
-	; own chain-pointer field (+4) gets a BCPL-shifted pointer to hunk
-	; 1's own +4 field (see this file's own header comment for the ABI).
-	move.l	a5,d0
-	addq.l	#4,d0
-	lsr.l	#2,d0
-	move.l	d0,4(a4)
+	; Rebuild LoadSeg's linked allocations for both v0 (two hunks)
+	; and v1 (one resident per memory class, plus scratch).
+	move.l 8(a3),d6
+	lea 20(a3),a2
+	move.l d6,d0
+	lsl.l #2,d0
+	lea 0(a2,d0.l),a0
+	suba.l a4,a4
+	suba.l a5,a5
+.hunk:
+	move.l (a2)+,d2
+	addq.l #4,a0		; HUNK_CODE
+	move.l (a0)+,d4
+	move.l a0,-(sp)
+	bsr.w AllocHunk
+	move.l (sp)+,a0
+	move.l a4,d0
+	bne.s .link
+	move.l a1,a4
+	bra.s .copy
+.link:
+	move.l a1,d0
+	addq.l #4,d0
+	lsr.l #2,d0
+	move.l d0,4(a5)
+.copy:
+	move.l a1,a5
+	addq.l #8,a1
+	move.l d4,d0
+	bsr.w CopyLongs
+	addq.l #4,a0		; HUNK_END
+	subq.l #1,d6
+	bne.s .hunk
 
 	; The scratch disk-read buffer has served its purpose - free it,
 	; same discipline stubs/common/runtime.i's own hunk-1-freeing logic
@@ -205,6 +192,10 @@ AllocHunk:
 	beq.s	.notchip
 	or.l	#MEMF_CHIP,d1
 .notchip:
+	btst #31,d2
+	beq.s .notfast
+	or.l #4,d1		; MEMF_FAST
+.notfast:
 	move.l	d3,d0
 	jsr	EXEC_AllocMem(a6)
 	tst.l	d0

@@ -144,10 +144,21 @@ so a partial/broken release is never visible if one target fails).
 
 Bump `build.zig.zon`'s own `.version` field to match before tagging -
 `execram --version` reads it directly, so the two should never drift.
-The tagged commit is assumed to have already passed the regular CI
-workflow; the release workflow doesn't duplicate every check CI already
-does (`tests/ratio/track_ratios.py` in particular), only `zig build
-test`.
+The release gate runs `zig build test` and the same compression-ratio
+check as CI, using a ReleaseFast executable. A passing unit suite alone
+cannot publish output that exceeds the reviewed size baseline.
+
+After changing the memory layout, also run:
+
+```sh
+EXECRAM_KICKSTART=~/amiga/KICK13.ROM python3 tests/uae/run_mixed_memory_test.py
+```
+
+This boots the original and packed reserved-tail/mixed-memory fixture
+through real AmigaDOS LoadSeg on a 512 KB Chip + 512 KB Slow A500. Host
+runtime tests additionally exercise all eight depackers, both flash modes,
+all overlap modes, explicit Fast memory, cross-region relocations, BSS,
+allocation guards, and the retained LoadSeg chain.
 
 Cross-compiling to a target this project had never built for before
 (`arm-linux-musleabihf`, by way of validating the whole matrix) found a
