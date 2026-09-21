@@ -69,8 +69,10 @@ BSS. It saves D2–D7/A2–A6 outside the legacy depacker wrappers: some wrapper
 set flash/parity registers before their own register saves.
 
 Finally it replaces group 0's link to scratch with scratch's next link,
-frees scratch using the normal LoadSeg allocation header, and jumps to
-group 0. Other residents remain linked for AmigaDOS UnLoadSeg. No extra
+pushes group 0's entry address, and tail-jumps to `FreeMem` using the normal
+LoadSeg allocation header. `FreeMem` returns directly into group 0 with the
+original stack pointer; execution never resumes in freed scratch.
+Other residents remain linked for AmigaDOS UnLoadSeg. No extra
 full-image buffer is allocated; DEFLATE still uses its small decoder workspace.
 
 ## Verification
@@ -79,6 +81,12 @@ Host tests load hunks at non-contiguous addresses with allocation guards,
 then execute the trampoline, dispatcher and actual depacker under Musashi.
 They check cross-region relocation values, BSS, reserved tails, and the
 retained chain for all eight depackers, overlap off/on/auto and flash off/on.
+The runtime fixtures run with 68000/68020/68030/68040 CPU modes and fake
+Exec versions 34/36/37/40. They verify cache-call gating and ordering,
+overwrite scratch immediately at `FreeMem`, reject execution from freed
+scratch, and check the entry stack and caller's return address. Musashi
+does not model real caches here; this is not cache-coherency or 68060
+hardware validation. Cached CPUs with Exec older than V37 remain unsupported.
 `run_mixed_memory_test.py` separately checks real LoadSeg allocation and
 execution on a 512 KB Chip + 512 KB Slow A500, including a writable reserved
 code tail and Chip-addressable data/BSS. The original input must boot first.

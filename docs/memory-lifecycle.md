@@ -93,7 +93,12 @@ exists: unlike the single-hunk scheme it replaced, hunk 1 (the compressed
 file bytes, now fully consumed) doesn't have to sit in memory for the
 rest of the process's life.
 
-**7. `jmp final+0` - and after.** Control passes to the payload's own
+**7. Return from `FreeMem` into `final+0` - and after.** The runtime
+pushes the payload entry address and tail-jumps to Exec's `FreeMem`.
+Its return enters the payload directly, restoring the original stack
+pointer and preserving the caller's return address. No instruction runs
+from scratch after it is freed, and no executable stack stub is needed.
+Control passes to the payload's own
 entry point. `final` (hunk 0) is now simply the running program's
 resident image; nothing about it changes at handoff. Hunk 1 no longer
 exists at all - `FreeMem` returned its memory to Exec's free pool in the
@@ -351,15 +356,10 @@ never freed at all), execram's overlap layout frees hunk 1 in full,
 matching its own default layout's mechanism exactly - `--mem=chip` still
 only ever affects hunk 0 (§5's own note), never hunk 1, in either layout.
 
-Worth flagging, found while reading this code rather than something this
-page can resolve on its own: Shrinkler's default and `--overlap` modes
-both call `CacheClearU` before jumping into freshly-decompressed code,
-skipped only on plain 68000s. execram's runtime never does this - its
-own `FLAG_OVERLAP` branch (`stubs/common/runtime.i`) included, this gap
-applies identically to execram's own `--overlap` mode, not just its
-default layout. Whether that's a real
-gap on 68020+ real hardware (as opposed to moot, if freshly allocated
-memory is never already sitting in an instruction cache to begin with)
-hasn't been investigated - noted here rather than in
-`docs/format-spec.md` §10 since it's a runtime-correctness question, not
-a format one.
+Both execram runtimes call `CacheClearU` after all decompression,
+relocation and BSS clearing, before freeing scratch and entering the
+resident program. This pushes dirty data-cache lines to memory and
+invalidates stale instructions, including the overwritten entry trampoline.
+The call is guarded by `ExecBase.lib_Version >= 37`; older Exec versions
+lack this API and skip it. Cached CPUs running older Exec versions still
+need a separate cache-coherency solution.

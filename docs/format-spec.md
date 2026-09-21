@@ -281,7 +281,9 @@ or `stubs/inflate/runtime_std.i`'s for inflate/zultra), with `final`
    process exit), then `FreeMem` hunk 1 - its own total size, recorded
    at *its* data-start-minus-8 by `LoadSeg`, is read back directly, no
    separate size tracking needed.
-9. Jump to `final + 0`.
+9. Enter `final + 0` via `FreeMem`'s return: push the entry address,
+   then tail-jump to `FreeMem` in step 8, so it returns directly to the
+   program with the original stack pointer. Never return into freed scratch.
 
 **ABI this depends on** (confirmed empirically under real FS-UAE across
 Kickstart v1.3 r34.005/v2.05 r37.350/v3.1 r40.063, not assumed from
@@ -386,7 +388,7 @@ branches on `FLAG_OVERLAP` right there and nowhere else:
   is `A0 = final + payload_offset` set, exactly as before.
 
 Every other step - `RelocFixup`, the BSS re-clear, detaching and
-`FreeMem`-ing hunk 1, the final `jmp final+0` - is **identical** between
+`FreeMem`-ing hunk 1, the final return into `final+0` - is **identical** between
 the two modes, reading the header directly exactly as §8 already
 describes: nothing about the header's own safety changes, since hunk 1
 (where it lives) is never written by `Depack` in either mode.
@@ -577,9 +579,7 @@ safely ignore (a newly-meaningful reserved flag bit, say).
   not a header change.
 - Per-region memory requirements are now supported by
   [v1 grouped memory](grouped-memory-format.md), addressing GitHub issue #2.
-- Whether `CacheClearU` (a 68020+ instruction-cache flush before jumping
-  into freshly-decompressed code, skipped on plain 68000s) is a real gap
-  on real 68020+ hardware - Shrinkler's own default and `--overlap`
-  decrunch headers both do this, execram's runtime never does
-  (`docs/memory-lifecycle.md`'s "Comparison" section) - not yet
-  investigated.
+- Both runtimes call `CacheClearU` after decompression and relocation,
+  before freeing scratch and entering the program, when Exec is V37 or
+  later. Older Exec versions skip the unavailable API; cache coherency
+  on cached CPUs with older Exec remains unsupported.

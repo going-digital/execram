@@ -41,8 +41,7 @@ Depack:
 	tst.l	d0
 	beq.w	Fail			; defined in runtime_std.i
 
-	add.l	#INFLATE_STORAGE_SIZE,d0
-	move.l	d0,a6			; a6 = *end* of scratch (OPT_STORAGE_OFFSTACK)
+	lea	INFLATE_STORAGE_SIZE(a2),a6	; end of scratch storage
 
 	bsr.s	inflate			; measured 120 bytes away - fits a short branch
 

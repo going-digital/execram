@@ -54,3 +54,6 @@ FLAG_KILLTWITCH		=	16
 
 RELOC_STREAM_END	=	$FE
 RELOC_STREAM_ESCAPE	=	$FF
+
+EXEC_LIB_VERSION	=	20	; Library.lib_Version in ExecBase
+EXEC_CacheClearU	=	-636	; available from Exec V37

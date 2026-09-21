@@ -31,15 +31,15 @@ Depack:
 
 	move.l	d0,d1
 	lsr.l	#2,d0
-.longs:
-	tst.l	d0
 	beq.s	.rembytes
+.longs:
 	move.l	(a0)+,(a1)+
 	move.w	d0,(a3)			; flicker: whatever's left in the loop counter, changes every pass
 	subq.l	#1,d0
-	bra.s	.longs
+	bne.s	.longs
 .rembytes:
-	and.l	#3,d1
+	moveq	#3,d0
+	and.l	d0,d1
 	beq.s	.done
 .rbloop:
 	move.b	(a0)+,(a1)+

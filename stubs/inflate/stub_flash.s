@@ -45,8 +45,7 @@ Depack:
 	tst.l	d0
 	beq.w	Fail			; defined in runtime.i
 
-	add.l	#INFLATE_STORAGE_SIZE,d0
-	move.l	d0,a6			; a6 = *end* of scratch (OPT_STORAGE_OFFSTACK)
+	lea	INFLATE_STORAGE_SIZE(a2),a6	; end of scratch storage
 
 	bsr.s	inflate			; d7 still holds our cached flags byte throughout - see this file's own header comment
 

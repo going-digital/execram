@@ -382,6 +382,20 @@ pub fn measureOverlapMargin(
 /// assumptions that the resident regions share one base address.
 pub const LoadedHunk = struct { base: u32, bytes: []u8, next: u32 };
 pub fn runExecutable(a: std.mem.Allocator, exe: []const u8) ![]LoadedHunk {
+    // Exercise both sides of the V37 cache API boundary for every runtime
+    // fixture. Musashi has no real cache; this checks call ordering/count.
+    for ([_]c_uint{ c.M68K_CPU_TYPE_68000, c.M68K_CPU_TYPE_68020, c.M68K_CPU_TYPE_68030, c.M68K_CPU_TYPE_68040 }) |cpu| {
+        for ([_]u16{ 34, 36, 37, 40 }) |version| {
+            const loaded = try runExecutableWithExecVersion(a, exe, version, cpu);
+            if (cpu == c.M68K_CPU_TYPE_68040 and version == 40) return loaded;
+            for (loaded) |h| a.free(h.bytes);
+            a.free(loaded);
+        }
+    }
+    unreachable;
+}
+
+fn runExecutableWithExecVersion(a: std.mem.Allocator, exe: []const u8, version: u16, cpu: c_uint) ![]LoadedHunk {
     const hunk = @import("hunk.zig");
     var file = try hunk.parse(a, exe);
     defer file.deinit();
@@ -408,22 +422,48 @@ pub fn runExecutable(a: std.mem.Allocator, exe: []const u8) ![]LoadedHunk {
     }
     @memcpy(mem[FAKE_EXEC_CODE_BASE..][0..fake_exec.len], fake_exec);
     m68k_write_memory_32(4, FAKE_EXEC_CODE_BASE + EXEC_FREEMEM_LVO);
+    const exec_base = FAKE_EXEC_CODE_BASE + EXEC_FREEMEM_LVO;
+    const cache_clear = exec_base - 636;
+    m68k_write_memory_16(exec_base + 20, version);
+    // Only install the vector where the OS actually provides it.
+    if (version >= 37) m68k_write_memory_16(cache_clear, 0x4e75); // RTS
     c.m68k_init();
-    c.m68k_set_cpu_type(c.M68K_CPU_TYPE_68000);
+    c.m68k_set_cpu_type(cpu);
     c.m68k_pulse_reset();
-    c.m68k_set_reg(c.M68K_REG_SP, address + 16384);
+    const initial_sp = address + 16384;
+    m68k_write_memory_32(initial_sp, 0x12345678); // caller's return address
+    c.m68k_set_reg(c.M68K_REG_SP, initial_sp);
     c.m68k_set_reg(c.M68K_REG_PC, loaded[0].base);
     _ = c.m68k_execute(0);
     _ = c.m68k_execute(1); // leave the trampoline before waiting for entry
     var steps: usize = 0;
+    var cache_calls: usize = 0;
+    var scratch_freed = false;
     while (c.m68k_get_reg(null, c.M68K_REG_PC) != loaded[0].base) {
         const pc = c.m68k_get_reg(null, c.M68K_REG_PC);
+        if (scratch_freed and pc >= loaded[1].base and pc < loaded[1].base + loaded[1].bytes.len) return error.ExecutedFreedScratch;
+        if (pc == cache_clear) {
+            if (version < 37) return error.UnavailableCacheClearCalled;
+            cache_calls += 1;
+        }
+        if (pc == FAKE_EXEC_CODE_BASE and c.m68k_get_reg(null, c.M68K_REG_A1) == loaded[1].base - 8) {
+            if (cache_calls != @as(usize, if (version >= 37) 1 else 0)) return error.CacheClearOrdering;
+            if (scratch_freed) return error.ScratchFreedTwice;
+            if (c.m68k_get_reg(null, c.M68K_REG_D0) != loaded[1].bytes.len + 8) return error.WrongScratchFreeSize;
+            // Simulate immediate reuse before FreeMem returns. A return
+            // into the old stub must fail even if prefetch hides poisoning.
+            @memset(mem[loaded[1].base - 8 ..][0 .. loaded[1].bytes.len + 8], 0xcc);
+            scratch_freed = true;
+        }
         if (steps > 1000000 or (pc < loaded[0].base and pc < FAKE_EXEC_CODE_BASE)) {
             return error.RuntimeDidNotReachEntry;
         }
         _ = c.m68k_execute(1);
         steps += 1;
     }
+    if (cache_calls != @as(usize, if (version >= 37) 1 else 0)) return error.CacheClearCount;
+    if (!scratch_freed) return error.ScratchNotFreed;
+    if (c.m68k_get_reg(null, c.M68K_REG_SP) != initial_sp or m68k_read_memory_32(initial_sp) != 0x12345678) return error.EntryStackCorrupted;
     for (loaded) |*h| {
         @memcpy(h.bytes, mem[h.base..][0..h.bytes.len]);
         h.next = m68k_read_memory_32(h.base - 4);

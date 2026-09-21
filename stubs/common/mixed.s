@@ -47,7 +47,7 @@ Start:
 	adda.l DESC_DEST(a2),a1
 	move.l HDR_COMPRESSED_SIZE(a2),d0
 	addq.l #3,d0
-	and.l #-4,d0
+	and.b #$fc,d0
 	adda.l d0,a0
 	adda.l d0,a1
 	lsr.l #2,d0
@@ -87,7 +87,6 @@ Start:
 	move.b (a0)+,d1
 	cmp.b #$ff,d1
 	bne.s .delta
-	moveq #0,d1
 	move.b (a0)+,d1
 	lsl.l #8,d1
 	move.b (a0)+,d1
@@ -117,12 +116,18 @@ Start:
 
 	; Remove only scratch, retaining the other residents for UnLoadSeg.
 	move.l d5,a4
+	; All groups are decoded and relocated. Flush before freeing scratch.
+	move.l 4.w,a6
+	cmp.w #37,EXEC_LIB_VERSION(a6)
+	blo.s .cache_done
+	jsr EXEC_CacheClearU(a6)
+.cache_done:
 	lea Start(pc),a3
 	move.l -4(a3),-4(a4)
 	move.l -8(a3),d0
 	lea -8(a3),a1
-	move.l 4.w,a6
-	jsr -210(a6)
-	jmp (a4)
+	; FreeMem must not return into the scratch allocation it just freed.
+	move.l a4,-(sp)
+	jmp -210(a6)		; RTS enters the program with the original SP
 	even
 MixedHeader:

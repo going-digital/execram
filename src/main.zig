@@ -1195,3 +1195,48 @@ test "single explicit Fast region uses MEMF_FAST and detaches scratch" {
     try info.printInfo(a, &report.writer, exe, &.{.{ .stub_name = "grouped", .bytes = mixed_container.stub }});
     try std.testing.expect(std.mem.indexOf(u8, report.written(), "region 0: fast") != null);
 }
+
+test "store peepholes preserve zero short and full-width copy counts" {
+    const a = std.testing.allocator;
+    const cases = [_]struct { stub: []const u8, listing: []const u8 }{
+        .{ .stub = stub_store, .listing = listing_store },
+        .{ .stub = stub_store_flash, .listing = listing_store_flash },
+    };
+    for (cases) |case| {
+        for ([_]usize{ 0, 1, 2, 3, 4, 5, 6, 7, 262144, 262145, 262146, 262147 }) |len| {
+            const payload = try a.alloc(u8, len);
+            defer a.free(payload);
+            for (payload, 0..) |*byte, i| byte.* = @truncate(i *% 37 +% 19);
+            const result = try musashi_bench.timeDepack(a, case.stub, try musashi_bench.parseDepackOffset(case.listing), payload, @intCast(len), @intCast(len));
+            defer a.free(result.output);
+            try std.testing.expectEqualSlices(u8, payload, result.output);
+        }
+    }
+}
+
+test "standard runtime peepholes preserve escaped relocations in both layouts" {
+    const a = std.testing.allocator;
+    var code = [_]u8{0} ** 2048;
+    std.mem.writeInt(u32, code[600..604], 12, .big);
+    std.mem.writeInt(u32, code[1200..1204], 16, .big);
+    // Four-byte escape values start at odd then even addresses.
+    var reloc = [_]u8{ 0xff, 0, 0, 1, 44, 0xff, 0, 0, 1, 44, 0xfe };
+    const image = flatten.FlatImage{ .allocator = a, .code_data = &code, .bss_size = 16, .reloc_stream = &reloc, .mem_chip = false };
+    for ([_][]const u8{ "store", "inflate" }) |name| {
+        for ([_]OverlapMode{ .off, .on }) |overlap| {
+            for ([_]FlashMode{ .off, .on }) |flash| {
+                var arena = std.heap.ArenaAllocator.init(a);
+                defer arena.deinit();
+                const exe = try packWithBackend(arena.allocator(), image, name, false, flash, false, overlap);
+                const loaded = try musashi_bench.runExecutable(a, exe);
+                defer {
+                    for (loaded) |h| a.free(h.bytes);
+                    a.free(loaded);
+                }
+                try std.testing.expectEqual(loaded[0].base + 12, std.mem.readInt(u32, loaded[0].bytes[600..604], .big));
+                try std.testing.expectEqual(loaded[0].base + 16, std.mem.readInt(u32, loaded[0].bytes[1200..1204], .big));
+                for (loaded[0].bytes[2048..2064]) |byte| try std.testing.expectEqual(@as(u8, 0), byte);
+            }
+        }
+    }
+}

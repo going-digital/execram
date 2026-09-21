@@ -110,7 +110,7 @@ Start:
 
 	btst	#1,HDR_FLAGS(a2)	; FLAG_HAS_RELOCS
 	beq.s	.norelocs
-	bsr.s	RelocFixup		; measured 48 bytes away - fits a short branch
+	bsr.s	RelocFixup		; within short-branch range
 .norelocs:
 
 	; Clear BSS: this region of the buffer still holds whatever Depack/
@@ -134,6 +134,12 @@ Start:
 	subq.l	#1,d0
 	bne.s	.bssclear
 .bssdone:
+	; Publish decompressed/relocated instructions before executing them.
+	; Older Exec versions have no CacheClearU vector.
+	cmp.w	#37,EXEC_LIB_VERSION(a6)
+	blo.s	.cache_done
+	jsr	EXEC_CacheClearU(a6)
+.cache_done:
 
 	; Detach hunk 1 (this hunk) from hunk 0's own chain-pointer field so
 	; AmigaDOS's own UnLoadSeg (at process exit) doesn't try to free it
@@ -142,17 +148,15 @@ Start:
 	; design: unlike the old single-allocation scheme's loaded hunk
 	; (never freed - docs/memory-lifecycle.md's "What never happens"),
 	; this hunk genuinely is scratch space once Depack/RelocFixup are
-	; done with it, and Shrinkler's own default decrunch header proves
-	; it's safe to reclaim exactly this way (docs/memory-lifecycle.md's
-	; "Comparison" section).
+	; done with it. Tail-call FreeMem with the program entry as its return
+	; address, so execution never returns to this freed scratch hunk.
 	clr.l	-4(a4)			; hunk 0's own chain pointer no longer references this hunk
 
 	lea	Start(pc),a3		; a3 = this hunk's own base (its data start)
 	move.l	-8(a3),d0		; this hunk's own total AllocMem'd size (already includes the 8-byte overhead FreeMem expects)
 	lea	-8(a3),a1		; a1 = this hunk's own block base
-	jsr	EXEC_FreeMem(a6)
-
-	jmp	(a4)
+	move.l	a4,-(sp)		; FreeMem returns directly to the program
+	jmp	EXEC_FreeMem(a6)		; its RTS restores the original SP
 
 Fail:
 	; docs/format-spec.md §8: no recovery behavior defined for v0 (only
@@ -169,6 +173,7 @@ Fail:
 RelocFixup:
 	move.l	HDR_CODE_DATA_SIZE(a2),d0
 	lea	0(a4,d0.l),a5		; a5 = reloc-stream read pointer
+	move.l	a4,d2			; constant relocation base
 	moveq	#0,d6			; d6 = running site offset ("prev")
 .next:
 	moveq	#0,d1
@@ -187,7 +192,6 @@ RelocFixup:
 	; machine (this is very likely the actual cause of the real-
 	; hardware failure that motivated this fix). Read it byte-by-byte
 	; instead: legal at any address.
-	moveq	#0,d1
 	move.b	(a5)+,d1
 	lsl.l	#8,d1
 	move.b	(a5)+,d1
@@ -198,9 +202,7 @@ RelocFixup:
 .havehalf:
 	lsl.l	#1,d1			; delta = half_delta * 2
 	add.l	d1,d6
-	move.l	(a4,d6.l),d2
-	add.l	a4,d2
-	move.l	d2,(a4,d6.l)
+	add.l	d2,(a4,d6.l)
 	bra.s	.next
 .done:
 	rts
@@ -230,7 +232,7 @@ RelocFixup:
 OverlapPayloadOffset:
 	move.l	d0,d2
 	addq.l	#3,d2
-	and.l	#-4,d2			; d2 = align4(compressed_size)
+	and.b	#$fc,d2			; d2 = align4(compressed_size)
 	move.l	d2,d4			; d4 = align4(compressed_size), preserved for OverlapMovePayload's own use below (d2 itself gets overwritten with payload_offset further down)
 
 	; d1 = resident_tail_size = align4(code_data_size + max(bss_size, reloc_stream_size))
@@ -243,7 +245,7 @@ OverlapPayloadOffset:
 .residtail_have_max:
 	add.l	HDR_CODE_DATA_SIZE(a2),d1
 	addq.l	#3,d1
-	and.l	#-4,d1			; d1 = resident_tail_size
+	and.b	#$fc,d1			; d1 = resident_tail_size
 
 	; d3 = on_disk_len = trampoline_size + align4(compressed_size): the
 	; trampoline itself (hunk 0's own on-disk prefix, always present
@@ -272,7 +274,7 @@ OverlapPayloadOffset:
 	move.l	d3,d1
 .have_allocated_size:
 	addq.l	#3,d1
-	and.l	#-4,d1			; d1 = allocated_size
+	and.b	#$fc,d1			; d1 = allocated_size
 
 	sub.l	d2,d1			; d1 = allocated_size - align4(compressed_size) = payload_offset
 	move.l	d1,d2			; d2 = payload_offset (return value)
