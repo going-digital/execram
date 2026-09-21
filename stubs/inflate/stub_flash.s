@@ -39,13 +39,13 @@ Depack:
 	move.l	4.w,a6			; ExecBase
 	move.l	#INFLATE_STORAGE_SIZE,d0
 	moveq	#0,d1			; MEMF_ANY
-	jsr	EXEC_AllocMem(a6)
+	jsr		EXEC_AllocMem(a6)
 	move.l	d0,a2			; a2 = scratch block base (reused; our
 					; caller's a2 is safe on the stack)
 	tst.l	d0
 	beq.w	Fail			; defined in runtime.i
 
-	lea	INFLATE_STORAGE_SIZE(a2),a6	; end of scratch storage
+	lea		INFLATE_STORAGE_SIZE(a2),a6	; end of scratch storage
 
 	bsr.s	inflate			; d7 still holds our cached flags byte throughout - see this file's own header comment
 
@@ -55,7 +55,7 @@ Depack:
 					; a6 still holds that, not this
 	move.l	#INFLATE_STORAGE_SIZE,d0
 	move.l	a2,a1
-	jsr	EXEC_FreeMem(a6)
+	jsr		EXEC_FreeMem(a6)
 
 	movem.l	(sp)+,d2-d7/a2-a6	; restores the CALLER's own original d2-d7/a2-a6, discarding our own d7 use
 	rts

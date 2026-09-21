@@ -48,6 +48,8 @@ lz4_depack:
 
 ;-------------------------------------------------------------------
 ;
+; MODIFIED for execram: repeated copies use REPT/ENDR without changing
+; generated instruction offsets or jump targets.
 ; this part is generated
 ;
 ;-------------------------------------------------------------------
@@ -63,20 +65,9 @@ lz4_depack:
 lz4Rts0:	rts
 
 sl_sm0:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts1
 		move.b	(a0)+,d0
@@ -85,10 +76,9 @@ sl_sm0:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	4
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -98,20 +88,9 @@ sl_sm0:
 lz4Rts1:	rts
 
 sl_sm1:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts2
 		move.b	(a0)+,d0
@@ -120,11 +99,9 @@ sl_sm1:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	5
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -134,20 +111,9 @@ sl_sm1:
 lz4Rts2:	rts
 
 sl_sm2:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts3
 		move.b	(a0)+,d0
@@ -156,12 +122,9 @@ sl_sm2:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	6
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -171,20 +134,9 @@ sl_sm2:
 lz4Rts3:	rts
 
 sl_sm3:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts4
 		move.b	(a0)+,d0
@@ -193,13 +145,9 @@ sl_sm3:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	7
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -209,20 +157,9 @@ sl_sm3:
 lz4Rts4:	rts
 
 sl_sm4:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts5
 		move.b	(a0)+,d0
@@ -231,14 +168,9 @@ sl_sm4:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	8
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -248,20 +180,9 @@ sl_sm4:
 lz4Rts5:	rts
 
 sl_sm5:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts6
 		move.b	(a0)+,d0
@@ -270,15 +191,9 @@ sl_sm5:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	9
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -288,20 +203,9 @@ sl_sm5:
 lz4Rts6:	rts
 
 sl_sm6:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts7
 		move.b	(a0)+,d0
@@ -310,16 +214,9 @@ sl_sm6:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	10
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -329,20 +226,9 @@ sl_sm6:
 lz4Rts7:	rts
 
 sl_sm7:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts8
 		move.b	(a0)+,d0
@@ -351,17 +237,9 @@ sl_sm7:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	11
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -371,20 +249,9 @@ sl_sm7:
 lz4Rts8:	rts
 
 sl_sm8:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts9
 		move.b	(a0)+,d0
@@ -393,18 +260,9 @@ sl_sm8:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	12
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -414,20 +272,9 @@ sl_sm8:
 lz4Rts9:	rts
 
 sl_sm9:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts10
 		move.b	(a0)+,d0
@@ -436,19 +283,9 @@ sl_sm9:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	13
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -458,20 +295,9 @@ sl_sm9:
 lz4Rts10:	rts
 
 sl_sm10:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts11
 		move.b	(a0)+,d0
@@ -480,20 +306,9 @@ sl_sm10:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	14
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -503,20 +318,9 @@ sl_sm10:
 lz4Rts11:	rts
 
 sl_sm11:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts12
 		move.b	(a0)+,d0
@@ -525,21 +329,9 @@ sl_sm11:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	15
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -549,20 +341,9 @@ sl_sm11:
 lz4Rts12:	rts
 
 sl_sm12:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts13
 		move.b	(a0)+,d0
@@ -571,22 +352,9 @@ sl_sm12:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	16
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -596,20 +364,9 @@ sl_sm12:
 lz4Rts13:	rts
 
 sl_sm13:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts14
 		move.b	(a0)+,d0
@@ -618,23 +375,9 @@ sl_sm13:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	17
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -644,20 +387,9 @@ sl_sm13:
 lz4Rts14:	rts
 
 sl_sm14:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts15
 		move.b	(a0)+,d0
@@ -666,24 +398,9 @@ sl_sm14:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	18
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -693,20 +410,9 @@ sl_sm14:
 lz4Rts15:	rts
 
 sl_lm:
+		REPT	14
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 		cmpa.l	a0,a4
 		beq.s	lz4Rts16
 		move.b	(a0)+,d0
@@ -726,22 +432,9 @@ sl_lm:
 		neg.w	d5
 		jmp		.eloop1(pc,d5.w)
 .tloop1:
+		REPT	16
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 .eloop1:	sub.l	d7,d1
 		bpl.s	.tloop1
 		moveq	#0,d0
@@ -764,22 +457,9 @@ ll_sm0:
 		neg.w	d5
 		jmp		.eloop3(pc,d5.w)
 .tloop3:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop3:	sub.l	d7,d1
 		bpl.s	.tloop3
 		cmpa.l	a0,a4
@@ -790,10 +470,9 @@ ll_sm0:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	4
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -814,22 +493,9 @@ ll_sm1:
 		neg.w	d5
 		jmp		.eloop5(pc,d5.w)
 .tloop5:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop5:	sub.l	d7,d1
 		bpl.s	.tloop5
 		cmpa.l	a0,a4
@@ -840,11 +506,9 @@ ll_sm1:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	5
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -865,22 +529,9 @@ ll_sm2:
 		neg.w	d5
 		jmp		.eloop7(pc,d5.w)
 .tloop7:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop7:	sub.l	d7,d1
 		bpl.s	.tloop7
 		cmpa.l	a0,a4
@@ -891,12 +542,9 @@ ll_sm2:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	6
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -917,22 +565,9 @@ ll_sm3:
 		neg.w	d5
 		jmp		.eloop9(pc,d5.w)
 .tloop9:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop9:	sub.l	d7,d1
 		bpl.s	.tloop9
 		cmpa.l	a0,a4
@@ -943,13 +578,9 @@ ll_sm3:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	7
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -970,22 +601,9 @@ ll_sm4:
 		neg.w	d5
 		jmp		.eloop11(pc,d5.w)
 .tloop11:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop11:	sub.l	d7,d1
 		bpl.s	.tloop11
 		cmpa.l	a0,a4
@@ -996,14 +614,9 @@ ll_sm4:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	8
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1024,22 +637,9 @@ ll_sm5:
 		neg.w	d5
 		jmp		.eloop13(pc,d5.w)
 .tloop13:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop13:	sub.l	d7,d1
 		bpl.s	.tloop13
 		cmpa.l	a0,a4
@@ -1050,15 +650,9 @@ ll_sm5:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	9
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1079,22 +673,9 @@ ll_sm6:
 		neg.w	d5
 		jmp		.eloop15(pc,d5.w)
 .tloop15:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop15:	sub.l	d7,d1
 		bpl.s	.tloop15
 		cmpa.l	a0,a4
@@ -1105,16 +686,9 @@ ll_sm6:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	10
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1135,22 +709,9 @@ ll_sm7:
 		neg.w	d5
 		jmp		.eloop17(pc,d5.w)
 .tloop17:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop17:	sub.l	d7,d1
 		bpl.s	.tloop17
 		cmpa.l	a0,a4
@@ -1161,17 +722,9 @@ ll_sm7:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	11
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1192,22 +745,9 @@ ll_sm8:
 		neg.w	d5
 		jmp		.eloop19(pc,d5.w)
 .tloop19:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop19:	sub.l	d7,d1
 		bpl.s	.tloop19
 		cmpa.l	a0,a4
@@ -1218,18 +758,9 @@ ll_sm8:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	12
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1250,22 +781,9 @@ ll_sm9:
 		neg.w	d5
 		jmp		.eloop21(pc,d5.w)
 .tloop21:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop21:	sub.l	d7,d1
 		bpl.s	.tloop21
 		cmpa.l	a0,a4
@@ -1276,19 +794,9 @@ ll_sm9:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	13
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1309,22 +817,9 @@ ll_sm10:
 		neg.w	d5
 		jmp		.eloop23(pc,d5.w)
 .tloop23:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop23:	sub.l	d7,d1
 		bpl.s	.tloop23
 		cmpa.l	a0,a4
@@ -1335,20 +830,9 @@ ll_sm10:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	14
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1369,22 +853,9 @@ ll_sm11:
 		neg.w	d5
 		jmp		.eloop25(pc,d5.w)
 .tloop25:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop25:	sub.l	d7,d1
 		bpl.s	.tloop25
 		cmpa.l	a0,a4
@@ -1395,21 +866,9 @@ ll_sm11:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	15
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1430,22 +889,9 @@ ll_sm12:
 		neg.w	d5
 		jmp		.eloop27(pc,d5.w)
 .tloop27:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop27:	sub.l	d7,d1
 		bpl.s	.tloop27
 		cmpa.l	a0,a4
@@ -1456,22 +902,9 @@ ll_sm12:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	16
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1492,22 +925,9 @@ ll_sm13:
 		neg.w	d5
 		jmp		.eloop29(pc,d5.w)
 .tloop29:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop29:	sub.l	d7,d1
 		bpl.s	.tloop29
 		cmpa.l	a0,a4
@@ -1518,23 +938,9 @@ ll_sm13:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	17
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1555,22 +961,9 @@ ll_sm14:
 		neg.w	d5
 		jmp		.eloop31(pc,d5.w)
 .tloop31:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop31:	sub.l	d7,d1
 		bpl.s	.tloop31
 		cmpa.l	a0,a4
@@ -1581,24 +974,9 @@ ll_sm14:
 		move.b	d0,d3
 		move.l	a1,a2
 		sub.l	d3,a2
+		REPT	18
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		move.w	d0,(a5)		; flicker: keep the hardware color register changing
@@ -1619,22 +997,9 @@ ll_lm:
 		neg.w	d5
 		jmp		.eloop33(pc,d5.w)
 .tloop33:
+		REPT	16
 		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
-		move.b	(a0)+,(a1)+
+		ENDR
 .eloop33:	sub.l	d7,d1
 		bpl.s	.tloop33
 		cmpa.l	a0,a4
@@ -1656,22 +1021,9 @@ ll_lm:
 		neg.w	d5
 		jmp		.eloop35(pc,d5.w)
 .tloop35:
+		REPT	16
 		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
-		move.b	(a2)+,(a1)+
+		ENDR
 .eloop35:	sub.l	d7,d1
 		bpl.s	.tloop35
 		moveq	#0,d0

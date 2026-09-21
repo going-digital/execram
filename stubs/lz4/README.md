@@ -30,13 +30,11 @@
 
 ## Modifications
 
-- `lz4_normal.asm`: two `repeat 15 { ... }` blocks (vasm's Motorola-
-  syntax module, `vasmm68k_mot`, doesn't support that block form -
-  confirmed directly, `error 2: unknown mnemonic <repeat>`) were
-  mechanically unrolled into 15 literal copies of the same instruction
-  each - identical generated code, marked inline at each site. Verified
-  byte-for-byte: the unrolled file assembles to exactly 180 bytes,
-  matching upstream's own documented size.
+- `lz4_normal.asm`: upstream's `repeat 15 { ... }` blocks use vasm's
+  Motorola-syntax `REPT 15` / `ENDR` form. Repeated copy instructions in
+  the normal and fastest decoders, including flash variants, also use
+  `REPT` / `ENDR`. Expansion is byte-for-byte identical to the explicit
+  instructions, preserving all jump-table offsets and timing.
 - None of the three decoders natively preserve D2-D7/A2-A6 the way
   `stubs/common/runtime.i`'s `Depack` contract requires (they were
   written for a simpler "just call and trust the caller doesn't need

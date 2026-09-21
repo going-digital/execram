@@ -506,11 +506,10 @@ genuinely different depackers, so each gets its own `backend_id`
 - **Modifications** (both documented inline at their exact location,
   per good practice - MIT doesn't require marking changes the way
   Apache 2.0 does):
-  - `lz4_normal.asm`: two `repeat 15 { ... }` blocks, a form
-    `vasmm68k_mot` doesn't support, mechanically unrolled into 15
-    literal copies of the same instruction each - verified
-    byte-for-byte, the unrolled file assembles to exactly upstream's
-    own documented 180 bytes.
+  - `lz4_normal.asm`: upstream's `repeat 15 { ... }` blocks use the
+    Motorola-syntax `REPT 15` / `ENDR` equivalent. Repeated copy
+    instructions in the normal and fastest decoders (plain and flash)
+    also use `REPT` / `ENDR`, with byte-for-byte identical output.
   - All three: wrapped in a `movem.l d2-d7/a2-a6,-(a7)` /
     `bsr.w lz4_depack` / `movem.l (a7)+,d2-d7/a2-a6` pair
     (`stubs/lz4/stub_{small,normal,fast}.s`) - none natively preserve

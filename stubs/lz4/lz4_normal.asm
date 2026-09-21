@@ -50,30 +50,15 @@ lz4_depack:
 .small:		add.w	d1,d1
 			neg.w	d1
 			jmp		.copys(pc,d1.w)
-; MODIFIED for execram: vasm 1.8e's Motorola-syntax module doesn't
-; support the `repeat N { }` block upstream used here - mechanically
-; unrolled to 15 literal copies of the same instruction (identical
-; generated code, no behavior change - see stubs/lz4/README.md).
+; MODIFIED for execram: use Motorola-syntax REPT/ENDR for upstream's
+; repeat blocks. Expansion preserves instruction offsets and jump targets.
+			REPT	15
 			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
+			ENDR
 .copys:
+			REPT	4
 			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
-			move.b	(a3)+,(a1)+
+			ENDR
 			
 .tokenLoop:	move.b	(a0)+,d0
 			move.l	d0,d1
@@ -86,22 +71,10 @@ lz4_depack:
 .litcopys:	add.w	d1,d1
 			neg.w	d1
 			jmp		.copys2(pc,d1.w)
-; MODIFIED for execram: same repeat-block expansion as .small above.
+; Same assembly-time repetition as .small above.
+			REPT	15
 			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
-			move.b	(a0)+,(a1)+
+			ENDR
 .copys2:
 			cmpa.l	a0,a4
 			bne		.lenOffset
